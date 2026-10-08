@@ -61,11 +61,13 @@ def score_risk(impact, disruption):
                              reason=pd.Series(dtype=str))
     df = impact.copy()
     severity = SEVERITY_WEIGHT.get(disruption.get("severity", "medium"), 0.5)
+    # parcels moved to another vehicle are no longer exposed to the disruption
+    exposed = ~df["off_route"] if "off_route" in df.columns else True
     df["risk_score"] = (
         WEIGHTS["slack"] * df["slack_min"].apply(slack_pressure)
         + WEIGHTS["priority"] * df["priority"].map(PRIORITY_WEIGHT).fillna(0.1)
-        + WEIGHTS["cascade"] * df["cascade_index"].apply(cascade_exposure)
-        + WEIGHTS["severity"] * severity
+        + (WEIGHTS["cascade"] * df["cascade_index"].apply(cascade_exposure)
+           + WEIGHTS["severity"] * severity) * exposed
     ).round(1)
     df["risk_label"] = df["risk_score"].apply(risk_label)
     df["reason"] = df.apply(make_reason, axis=1)

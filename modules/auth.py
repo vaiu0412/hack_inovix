@@ -40,7 +40,11 @@ MESSAGES = {  # short, one sentence each (shown as-is on the sign-in page and by
     "otp_invalid": "Wrong or expired code.",
     "otp_unknown": "No active account found.",
     "reset_ok": "Password changed. Sign in now.",
+    "google_unknown": "No DEPORT account for this email.",
+    "send_failed": "Couldn't send the code. Try again.",
+    "demo_off": "Demo access is off.",
 }
+DEMO_ACCOUNTS = {"branch_admin": "east.admin", "partner": "DP102", "super_admin": "superadmin"}
 _DUMMY = hash_password("timing-equaliser")  # verify against something even for unknown IDs
 
 
@@ -162,8 +166,20 @@ def revoke_session(token):
 
 
 # ---------------------------------------------------------------- one-time codes
-def sms_configured():
-    return bool(setting("SMS_API_KEY"))
+def otp_by_email():
+    """Real delivery when SMTP is configured (secrets SMTP_*); otherwise demo mode shows the code."""
+    from modules import mailer
+
+    return mailer.configured()
+
+
+def sms_configured():  # older name, kept for callers/tests
+    return otp_by_email()
+
+
+def _mask(email):
+    name, _, domain = str(email or "").partition("@")
+    return f"{name[:1]}***@{domain}" if domain else "your email"
 
 
 def request_otp(identifier, purpose):
@@ -187,10 +203,15 @@ def request_otp(identifier, purpose):
         conn.execute("INSERT INTO otp_codes(user_id, purpose, code_hash, salt, expires_at, created_at) VALUES "
                      "(?,?,?,?,?,?)", (row["user_id"], purpose, _sha(salt + code), salt,
                                        time.time() + OTP_MINUTES * 60, time.time()))
-        phone = row["phone"] or ""
+        email = row["email"] or ""
     store.audit(row["user_id"], f"otp_requested_{purpose}")
-    hint = f"…{phone[-4:]}" if phone else "your phone"
-    return (None if sms_configured() else code), f"Code sent to {hint}.", True
+    if otp_by_email():
+        from modules import mailer
+
+        if not mailer.send_code(email, code, purpose):
+            return None, MESSAGES["send_failed"], False
+        return None, f"Code sent to {_mask(email)}.", True
+    return code, "Demo mode: code shown on screen.", True
 
 
 def verify_otp(identifier, code, purpose):
@@ -279,13 +300,36 @@ def user_for_google_email(email):
     with store.connect() as conn:
         row = _find(conn, email)
         if not row or normalize(row["email"]) != normalize(email):
-            return None, "No account uses this Google email."
+            return None, MESSAGES["google_unknown"]
         problem = _status_problem(row, "workspace")
         if problem:
             return None, problem
         conn.execute("UPDATE users SET last_login = ? WHERE user_id = ?", (store.now_iso(), row["user_id"]))
         user = public(row)
     store.audit(user["user_id"], "login", "workspace", {"method": "google"}, user["branch_id"])
+    return user, None
+
+
+def demo_mode():
+    """Quick demo access for judges: only when DEMO_MODE=true in secrets or the environment (off by default)."""
+    return str(setting("DEMO_MODE", "false")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def demo_sign_in(kind):
+    """One-click sign-in to a seeded demo account ('branch_admin', 'partner', 'super_admin').
+    Refused unless DEMO_MODE is on; inactive accounts/branches are still refused. Audited."""
+    if not demo_mode():
+        return None, MESSAGES["demo_off"]
+    with store.connect() as conn:
+        row = _find(conn, DEMO_ACCOUNTS[kind])
+        if row is None:
+            return None, MESSAGES["bad_credentials"]
+        problem = _status_problem(row, "super" if kind == "super_admin" else "workspace")
+        if problem:
+            return None, problem
+        conn.execute("UPDATE users SET last_login = ? WHERE user_id = ?", (store.now_iso(), row["user_id"]))
+        user = public(row)
+    store.audit(user["user_id"], "login", "demo", {"method": "quick demo access"}, user["branch_id"])
     return user, None
 
 

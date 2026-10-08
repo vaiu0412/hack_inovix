@@ -23,3 +23,5 @@ with st.container(key="login_card"):
             lui.finish(user)
         st.session_state["console_msg"] = error
         st.rerun()
+    if lui.demo_mode():
+        lui.demo_chips(["super_admin"])

@@ -6,7 +6,6 @@ from html import escape
 import streamlit as st
 
 from modules import guards, ui
-from modules.parser import setting
 
 FEATURES = [("mic", "Report by voice"), ("insights", "See the impact"), ("bolt", "Fix in one click")]
 ROUTES_SVG = """<svg viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
@@ -32,7 +31,43 @@ def google_configured():
 
 def demo_mode():
     """'Quick demo access' chips for judges – only when DEMO_MODE=true (secrets or environment). Off by default."""
-    return str(setting("DEMO_MODE", "false")).strip().lower() in ("1", "true", "yes", "on")
+    from modules import auth
+
+    return auth.demo_mode()
+
+
+def google_email():
+    """The verified email of a Google account that just signed in (st.user), or None."""
+    try:
+        return st.user.email if st.user.is_logged_in else None
+    except Exception:
+        return None
+
+
+def handle_google(email):
+    """Google sign-in came back: an ACTIVE DEPORT account with this email signs in, nobody else
+    (accounts are never created). Returns (user, error)."""
+    from modules import auth
+
+    user, error = auth.user_for_google_email(email)
+    if error == auth.MESSAGES["use_super_portal"]:  # Super Admins use the console, not Google
+        error = auth.MESSAGES["google_unknown"]
+    return user, error
+
+
+def demo_chips(kinds):
+    """One-click demo accounts (only when DEMO_MODE is on). Signs in straight away."""
+    from modules import auth
+
+    labels = {"branch_admin": "Branch Admin", "partner": "Delivery Partner (DP102)", "super_admin": "Super Admin"}
+    st.markdown("<div class='lg-demo'>QUICK DEMO ACCESS</div>", unsafe_allow_html=True)
+    with st.container(horizontal=True, horizontal_alignment="center", gap="small"):
+        for kind in kinds:
+            if st.button(labels[kind], key=f"demo_{kind}", icon=":material/bolt:"):
+                user, error = auth.demo_sign_in(kind)
+                if user:
+                    finish(user)
+                st.error(error)
 
 
 def finish(user, remember=False):

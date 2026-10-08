@@ -162,6 +162,26 @@ def add_partner(actor, name, phone, email, vehicle_id, route_roads, shift_start=
     return dp_id, temp_password
 
 
+def set_partner_email(actor, dp_id, email):
+    """Branch Admin: set the email a partner signs in with (also used to match Google sign-in)."""
+    if actor.get("role") != "branch_admin":
+        raise PermissionError("Branch admins only")
+    email = str(email or "").strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[a-z]{2,}", email):
+        raise ValueError("Enter a valid email.")
+    with store.connect() as conn:
+        target = conn.execute("SELECT user_id FROM users WHERE dp_id = ? AND branch_id = ? AND role_id = 'partner'",
+                              (dp_id, actor["branch_id"])).fetchone()
+        if target is None:
+            raise PermissionError(f"{dp_id} is not a partner of your branch")
+        taken = conn.execute("SELECT user_id FROM users WHERE lower(email) = ? AND user_id != ?",
+                             (email, target["user_id"])).fetchone()
+        if taken:
+            raise ValueError("Email already used.")
+        conn.execute("UPDATE users SET email = ? WHERE user_id = ?", (email, target["user_id"]))
+    store.audit(actor["user_id"], "email_linked", dp_id, {"email": email}, actor["branch_id"])
+
+
 def set_partner_active(actor, dp_id, active):
     set_user_active(actor, dp_id, active)
 

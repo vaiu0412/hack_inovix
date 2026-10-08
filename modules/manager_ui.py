@@ -174,7 +174,8 @@ def live_map_view(ctx, height=620, key="live_map", filters=True):
             names = ctx["road_names"]
             road_pick = st.selectbox("Route", [None] + list(names), key=f"{key}_road", label_visibility="collapsed",
                                      format_func=lambda r: "All routes" if r is None else names[r], width=200)
-            focus = st.toggle("Focus alerts", key=f"{key}_focus", disabled=not ctx["open_issues"])
+            if ctx["open_issues"]:  # only when there is something to focus on (no dead controls)
+                focus = st.toggle("Focus alerts", key=f"{key}_focus")
         if status_pick:
             view = view[view["partner_id"].map(states).isin(status_pick)]
         if kind_pick:
@@ -243,6 +244,17 @@ def partner_panel(ctx, pid):
         if mine and review.button("Review", key=f"review_{pid}", icon=":material/report:", width="stretch",
                                   type="primary"):
             go("disruptions")
+        with st.popover("Link Google", icon=":material/alternate_email:", width="stretch"), \
+                st.form(f"link_google_{pid}", border=False):
+            email = st.text_input("Email", value=p.get("email") or "", placeholder="name@gmail.com",
+                                  help="Used for sign-in, OTP and Google")
+            if st.form_submit_button("Save", type="primary", width="stretch"):
+                try:
+                    admin.set_partner_email(ctx["actor"], pid, email)
+                    st.toast("Email saved.", icon=":material/check:")
+                    st.rerun()
+                except (ValueError, PermissionError) as error:
+                    st.error(str(error))
         stops = store.deliveries_df(p["vehicle_id"], branch_id=ctx["branch_id"])
         if len(stops):
             risk = risk_labels_now(ctx["open_issues"])

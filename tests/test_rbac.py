@@ -96,7 +96,7 @@ def test_sessions_remember_me_and_revoke(db, monkeypatch):
 # ---------------------------------------------------------------- OTP + forgot password
 def test_otp_login_is_single_use(db):
     code, message, ok = auth.request_otp("dp102@deport.in", "login")
-    assert ok and code and len(code) == 6 and "…0002" in message
+    assert ok and code and len(code) == 6 and message == "Demo mode: code shown on screen."  # no SMTP set
     with store.connect() as conn:
         assert all(code not in str(dict(r)) for r in conn.execute("SELECT * FROM otp_codes"))  # hashed
     assert auth.verify_otp("DP102", code, "login")[0]["user_id"] == "DP102"

@@ -39,16 +39,12 @@ if st.query_params.get("view") in VIEWS:  # plain links (e.g. "Forgot password?"
 view = st.session_state.setdefault("login_view", "signin")
 
 # real Google sign-in came back: the Google email must belong to an existing, active account
-if lui.google_configured():
-    try:
-        google_email = st.user.email if st.user.is_logged_in else None
-    except Exception:
-        google_email = None
-    if google_email:
-        user, error = auth.user_for_google_email(google_email)
-        if user:
-            lui.finish(user)
-        show(error)
+google_email = lui.google_email() if lui.google_configured() else None
+google_error = None
+if google_email and not st.session_state.get("authenticated"):
+    user, google_error = lui.handle_google(google_email)
+    if user:
+        lui.finish(user)
 
 lui.brand_header()
 with st.container(key="login_page"):
@@ -67,6 +63,10 @@ with st.container(key="login_page"):
             st.markdown("<p class='lg-title'>Welcome back</p><p class='lg-sub2'>Sign in to DEPORT</p>",
                         unsafe_allow_html=True)
             flash()
+            if google_error:  # signed in to Google, but no DEPORT account uses that email
+                st.error(google_error, icon=":material/no_accounts:")
+                if st.button("Use another account", icon=":material/logout:", key="google_logout", width="stretch"):
+                    st.logout()
             with st.form("signin_form", border=False, enter_to_submit=True):
                 identifier = st.text_input("Email or ID", placeholder=PLACEHOLDER, key="si_id", autocomplete="username")
                 password = st.text_input("Password", type="password", key="si_pw", autocomplete="current-password")
@@ -84,19 +84,18 @@ with st.container(key="login_page"):
                 show(error, "warning" if error == auth.MESSAGES["locked"] else "error")
                 st.rerun()
             st.markdown("<div class='lg-or'>or</div>", unsafe_allow_html=True)
-            if lui.google_configured():
+            if lui.google_configured():  # real Google OIDC only; no button at all when it isn't set up
                 if st.button("Continue with Google", key="google_btn", width="stretch"):
                     st.login("google")
-            else:
-                st.button("Continue with Google", key="google_btn", width="stretch", disabled=True,
-                          help="Google sign-in not set up")
-            if st.button("Sign in with OTP", icon=":material/sms:", key="otp_btn", width="stretch"):
+            if st.button("Sign in with OTP", icon=":material/mail:", key="otp_btn", width="stretch"):
                 go("otp", otp_step=1)
                 st.rerun()
+            if lui.demo_mode():
+                lui.demo_chips(["branch_admin", "partner"])
 
         # ------------------------------------------------ OTP sign-in
         elif view == "otp":
-            st.markdown("<p class='lg-title'>Sign in with OTP</p><p class='lg-sub2'>Code to your phone</p>",
+            st.markdown("<p class='lg-title'>Sign in with OTP</p><p class='lg-sub2'>Code to your email</p>",
                         unsafe_allow_html=True)
             flash()
             if st.session_state.get("otp_step", 1) == 1:
@@ -138,7 +137,7 @@ with st.container(key="login_page"):
 
         # ------------------------------------------------ forgot password
         elif view == "forgot":
-            st.markdown("<p class='lg-title'>Reset password</p><p class='lg-sub2'>Code to your phone</p>",
+            st.markdown("<p class='lg-title'>Reset password</p><p class='lg-sub2'>Code to your email</p>",
                         unsafe_allow_html=True)
             flash()
             if st.session_state.get("reset_step", 1) == 1:

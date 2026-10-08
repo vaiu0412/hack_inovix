@@ -79,8 +79,8 @@ def test_sign_in_page_shows_nothing_else(db):
     assert "Admin@123" not in text_of(at) and "Partner@123" not in text_of(at)   # no demo credentials
     visible = " ".join(m.value for m in at.markdown if not m.value.lstrip().startswith("<style>"))
     assert "Super Admin" not in visible and "console" not in visible.lower()     # console is not advertised
-    [google] = [b for b in at.button if b.label == "Continue with Google"]
-    assert google.disabled and google.help == "Google sign-in not set up"         # no fake Google flow
+    assert not [b for b in at.button if "Google" in (b.label or "")]               # not configured: no button at all
+    assert not [b for b in at.button if (b.key or "").startswith("demo_")]          # DEMO_MODE is off by default
 
 
 def test_sign_in_errors(db):

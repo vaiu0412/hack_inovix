@@ -96,6 +96,12 @@ def logout():
     st.session_state["_cookie_delete"] = True
     st.session_state["_cookie_rejected"] = True
     st.query_params.clear()
+    try:
+        google = st.user.is_logged_in
+    except Exception:
+        google = False
+    if google:
+        st.logout()  # also end the Google sign-in, or the sign-in page would map it straight back in
     st.rerun()
 
 

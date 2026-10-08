@@ -124,6 +124,44 @@ def find_places(text, limit=3):
     return out[:limit]
 
 
+@lru_cache(maxsize=1)
+def _area_index():
+    """Places only (areas, landmarks, then roads) – for delivery addresses, where the area matters."""
+    roads = load_all()["roads"]
+    road_names = dict(zip(roads["road_id"], roads["name"]))
+    entries = []
+    for place in load_places().itertuples():
+        for alias in [place.name, place.tamil] + list(place.aliases):
+            norm = normalize(alias) if isinstance(alias, str) else ""
+            if norm:
+                entries.append({"alias": norm, "compact": _compact(norm), "core": _core(norm.split()),
+                                "road_id": place.road_id, "road_name": road_names[place.road_id], "place": place.name,
+                                "kind": place.kind, "lat": float(place.lat), "lng": float(place.lng)})
+    return entries
+
+
+def find_area(text):
+    """Best place for an address ("pelamedu", "RS puram", "KMCH" ...) or None when not confident.
+    Areas and landmarks beat roads on a tie. -> {place, kind, road_id, road_name, lat, lng, score}"""
+    norm = normalize(text or "")
+    if not norm:
+        return None
+    words, compact, padded = norm.split(), _compact(norm), f" {norm} "
+    best, best_key = None, None
+    for entry in _area_index():
+        if f" {entry['alias']} " in padded:
+            score = 100
+        elif len(entry["compact"]) >= 6 and entry["compact"] in compact:
+            score = 97
+        else:
+            score = _fuzzy_score(words, entry)
+        key = (score, entry["kind"] != "road", len(entry["alias"]))
+        if score >= ACCEPT_SCORE and (best_key is None or key > best_key):
+            best, best_key = {k: entry[k] for k in ("place", "kind", "road_id", "road_name", "lat", "lng")}, key
+            best["score"] = round(score)
+    return best
+
+
 def best_road(text):
     """(best match or None, suggestions). best is None when we are not confident enough."""
     matches = find_places(text)

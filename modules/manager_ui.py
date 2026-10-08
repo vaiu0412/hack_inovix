@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-from modules import admin, guards, issues, live_map, operations, store, ui
+from modules import admin, assign, guards, issues, live_map, operations, store, ui
 from modules.data_loader import load_all
 from modules.graph_viz import build_graph, render_graph
 from modules.parser import SEVERITIES, llm_status
@@ -50,7 +50,8 @@ def kpi_tiles(ctx):
     k = operations.kpis(ctx["branch_id"])
     ui.kpi_cards([
         ("groups", k["on_duty"], "Partners active", f"of {k['partners']}", "navy"),
-        ("package_2", k["deliveries"], "Deliveries", f"{k['delivered']} done", None),
+        ("package_2", k["deliveries"], "Deliveries", f"{k['delivered']} done"
+         + (f" · {k['unassigned']} new" if k.get("unassigned") else ""), None),
         ("schedule", k["delayed"], "Delayed", "at risk now" if k["delayed"] else "on time", "delayed"),
         ("emergency", k["critical"], "Critical", "act now" if k["critical"] else
          f"{k['deadlines_saved']} saved today" if k["deadlines_saved"] else "none", "critical"),
@@ -181,7 +182,7 @@ def live_map_view(ctx, height=620, key="live_map", filters=True):
         if road_pick:
             view = view[view["route_roads"].fillna("").str.split("|").apply(lambda rs: road_pick in rs)]
     deliveries = store.deliveries_df(branch_id=ctx["branch_id"])
-    deliveries = deliveries[deliveries["vehicle_id"].isin(view["vehicle_id"])]
+    deliveries = deliveries[deliveries["vehicle_id"].isin(view["vehicle_id"]) | deliveries["vehicle_id"].isna()]
     disruptions, detours, risk = map_layers(ctx)
 
     holder = st.empty()
@@ -251,11 +252,84 @@ def partner_panel(ctx, pid):
             st.dataframe(view[["stop_order", "customer", "planned_eta", "deadline", "Status"]].rename(
                 columns={"stop_order": "#", "customer": "Customer", "planned_eta": "ETA", "deadline": "Due"}),
                 hide_index=True, width="stretch", height=min(36 * (len(view) + 1) + 3, 260))
+        open_stops = stops[~stops["status"].isin(store.ACTIVE_DONE)] if len(stops) else stops
+        if len(open_stops):
+            move = st.selectbox("Move work", open_stops["delivery_id"].tolist(), key=f"move_{pid}", index=None,
+                                placeholder="Move a delivery",
+                                format_func=lambda d: f"{d} · {open_stops.set_index('delivery_id').loc[d, 'customer']}")
+            if move:
+                reassign_controls(ctx, open_stops.set_index("delivery_id").loc[move].to_dict() | {"delivery_id": move})
         active = st.toggle("Account active", value=bool(p["account_active"]), key=f"partner_active_{pid}")
         if active != bool(p["account_active"]):
             admin.set_partner_active(ctx["actor"], pid, active)
             st.toast(f"{p['name']} {'activated' if active else 'deactivated'}.")
             st.rerun()
+
+
+def add_basemap(m):
+    return live_map.add_tiles(m, switcher=False)
+
+
+def order_card(ctx, order, found):
+    """One unassigned order: what, where, by when – the best match with its reason, Assign best / Choose."""
+    with ui.card(f"order_{order['delivery_id']}"):
+        due = order["deadline"]
+        st.markdown(f"<p class='dp-h3'>{escape(order['delivery_id'])} · {escape(order['customer'])}</p>"
+                    f"<p class='dp-small'>{escape(order['address_area'])} · {escape(order['priority'].capitalize())} · "
+                    f"{escape(str(order.get('package_size') or 'small').capitalize())} · due {due}</p>",
+                    unsafe_allow_html=True)
+        best = found[0] if found else None
+        if best:
+            st.markdown(f"<div style='margin:6px 0 10px'>{ui.pill_html('normal' if best['feasible'] else 'delayed', 'Best')}"
+                        f" <span class='dp-small'>{escape(best['reason'])}</span></div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<p class='dp-small'>No partner fits right now.</p>", unsafe_allow_html=True)
+        go_col, pick_col = st.columns(2)
+        if best and go_col.button("Assign best", type="primary", icon=":material/bolt:", width="stretch",
+                                  key=f"best_{order['delivery_id']}"):
+            result = assign.assign(ctx["actor"], order["delivery_id"], best["partner_id"], reason="Best match")
+            st.session_state["assign_msg"] = f"{order['delivery_id']} → {best['partner_id']} · ETA {result['eta']}."
+            st.rerun()
+        with pick_col.popover("Choose partner", icon=":material/person_search:", width="stretch"):
+            choose_partner_form(ctx, order, found, verb="Assign")
+
+
+def choose_partner_form(ctx, order, found, verb="Assign"):
+    options = [c for c in found if c["vehicle_id"] != order.get("vehicle_id")]
+    if not options:
+        st.caption("No other partner fits.")
+        return
+    reasons = {c["partner_id"]: c["reason"] for c in options}
+    with st.form(f"choose_{verb}_{order['delivery_id']}", border=False):
+        pick = st.selectbox("Partner", list(reasons), format_func=reasons.get)
+        reason = st.selectbox("Reason", assign.REASONS) if verb != "Assign" else "Chosen by admin"
+        if st.form_submit_button(verb, type="primary", width="stretch"):
+            try:
+                result = assign.assign(ctx["actor"], order["delivery_id"], pick, reason=reason)
+                st.session_state["assign_msg"] = f"{order['delivery_id']} → {pick} · ETA {result['eta']}."
+                st.toast(f"{order['delivery_id']} → {pick}.", icon=":material/check:")
+                st.rerun()
+            except (ValueError, PermissionError) as error:
+                st.error(str(error))
+
+
+def reassign_controls(ctx, delivery):
+    """Reassign or unassign one open order (a reason is required)."""
+    if delivery["status"] in store.ACTIVE_DONE:
+        return
+    found = assign.candidates(delivery, ctx["branch_id"])
+    has_partner = isinstance(delivery.get("vehicle_id"), str) and bool(delivery.get("vehicle_id"))
+    move_col, drop_col = st.columns(2)
+    with move_col.popover("Reassign" if has_partner else "Assign", icon=":material/swap_horiz:", width="stretch"):
+        choose_partner_form(ctx, delivery, found, verb="Reassign" if has_partner else "Assign")
+    if has_partner:
+        with drop_col.popover("Unassign", icon=":material/remove_circle:", width="stretch"), \
+                st.form(f"unassign_{delivery['delivery_id']}", border=False):
+            reason = st.selectbox("Reason", assign.REASONS)
+            if st.form_submit_button("Unassign", width="stretch"):
+                assign.unassign(ctx["actor"], delivery["delivery_id"], reason)
+                st.toast(f"{delivery['delivery_id']} back in the queue.")
+                st.rerun()
 
 
 # ---------------------------------------------------------------- partners table

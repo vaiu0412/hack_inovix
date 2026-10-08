@@ -195,7 +195,22 @@ def read_my_messages(user=Depends(partner_only)):
 
 @app.post("/me/deliveries/{delivery_id}/delivered")
 def deliver(delivery_id: str, user=Depends(partner_only)):
-    changed = _forbidden(lambda: partner_scope.mark_delivered(user["dp_id"], user["branch_id"], delivery_id))
+    try:
+        changed = _forbidden(lambda: partner_scope.mark_delivered(user["dp_id"], user["branch_id"], delivery_id))
+    except ValueError as error:  # e.g. not picked up yet – steps can't be skipped
+        raise HTTPException(409, str(error))
+    return {"ok": True, "changed": changed}
+
+
+@app.post("/me/deliveries/{delivery_id}/{step}")
+def advance(delivery_id: str, step: str, user=Depends(partner_only)):
+    """step: accepted | picked_up | in_transit (Accept -> Picked up -> Start), in order."""
+    if step not in ("accepted", "picked_up", "in_transit"):
+        raise HTTPException(404, "Unknown step")
+    try:
+        changed = _forbidden(lambda: partner_scope.advance_delivery(user["dp_id"], user["branch_id"], delivery_id, step))
+    except ValueError as error:
+        raise HTTPException(409, str(error))
     return {"ok": True, "changed": changed}
 
 

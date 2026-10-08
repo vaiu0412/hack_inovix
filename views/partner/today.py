@@ -3,7 +3,7 @@ from html import escape
 
 import streamlit as st
 
-from modules import guards, partner_scope as scope, ui
+from modules import guards, partner_scope as scope, partner_ui, ui
 
 guards.require_role("partner")
 dp_id = guards.dp_id()  # from the validated session only
@@ -40,8 +40,21 @@ if unread:
             scope.mark_notifications_read(dp_id, branch)
             st.rerun()
 
+# ---------------------------------------------------------------- new work from the branch admin
+new_work = deliveries[deliveries["status"] == "assigned"].sort_values("eta_min")
+if len(new_work):
+    with ui.card("new_work"):
+        st.markdown(f"<p class='dp-h3'>{ui.icon('assignment')} New work · {len(new_work)}</p>", unsafe_allow_html=True)
+        for d in new_work.to_dict("records"):
+            st.markdown(f"<div class='dp-row'><div class='main'><b>{escape(d['delivery_id'])} · {escape(d['customer'])}</b>"
+                        f"<small>{escape(d['address_area'])} · {escape(str(d.get('package_size') or 'small').capitalize())}"
+                        f" · due {d['deadline']}</small></div><div class='end'>{partner_ui.stage_pill(d['status'])}</div>"
+                        f"</div>", unsafe_allow_html=True)
+            partner_ui.step_buttons(dp_id, branch, d, key=f"new_{d['delivery_id']}")
+
 # ---------------------------------------------------------------- next stop + progress
 todo = deliveries[~deliveries["status"].isin(["delivered", "failed"])].sort_values("eta_min")
+todo = todo[todo["status"] != "assigned"] if len(todo[todo["status"] != "assigned"]) else todo
 done = int((deliveries["status"] == "delivered").sum())
 if len(todo):
     nxt = todo.iloc[0]
@@ -55,6 +68,7 @@ if len(todo):
             tags += " " + ui.risk_badge(nxt["risk"])
         if nxt["note"]:
             tags += " " + ui.pill_html("available", str(nxt["note"]).capitalize())
+        tags += " " + partner_ui.stage_pill(nxt["status"])
         st.markdown(f"<p class='dp-sub'>{escape(nxt['address_area'])}</p><div style='margin:8px 0'>{tags}</div>"
                     + ui.kv([("Due", escape(nxt["deadline"])), ("ETA", escape(nxt["planned_eta"])),
                              ("Order", escape(nxt["delivery_id"]))]), unsafe_allow_html=True)
@@ -62,12 +76,7 @@ if len(todo):
         nav.link_button("Navigate", f"https://www.google.com/maps/dir/?api=1&destination={nxt['lat']},{nxt['lng']}",
                         icon=":material/navigation:", width="stretch")
         call.link_button("Call", f"tel:{nxt['customer_phone']}", icon=":material/call:", width="stretch")
-        if st.button("Mark delivered", type="primary", icon=":material/check:", width="stretch", key="deliver_next"):
-            scope.mark_delivered(dp_id, branch, nxt["delivery_id"])
-            st.toast("Delivered.", icon=":material/check:")
-            st.rerun()
-        if st.button("Report issue", icon=":material/campaign:", width="stretch", key="report_from_today"):
-            st.switch_page(guards.PARTNER_PAGES["report"])
+        partner_ui.step_buttons(dp_id, branch, nxt.to_dict(), key="next")
 elif len(deliveries):
     with ui.card("all_done"):
         ui.empty_state("task_alt", "All stops done. Great work.")

@@ -62,6 +62,13 @@ def _clear(prefix):
     ui.resume_live_updates()
 
 
+def prefill(prefix, tile, text):
+    """Open the form already filled in (e.g. 'Can't deliver D31')."""
+    st.session_state[_key(prefix, "tile")] = tile
+    st.session_state[_key(prefix, "text")] = text
+    st.session_state[_key(prefix, "draft_loaded")] = True
+
+
 def _restore_draft(prefix, user_id):
     """Once per form round: put a saved draft (tile, text, voice note) back into the fields."""
     if not user_id or st.session_state.get(_key(prefix, "draft_loaded")):

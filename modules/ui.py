@@ -31,6 +31,7 @@ STATUS = {
     "break": ("Break", "dp-s-off", "#94A3B8", "⚪"),
     "off": ("Off", "dp-s-off", "#94A3B8", "⚪"),
     "done": ("Done", "dp-s-normal", "#16A34A", "✅"),
+    "unassigned": ("Unassigned", "dp-s-off", "#94A3B8", "⚪"),
 }
 RISK_STATE = {"Critical": "critical", "High": "delayed", "Medium": "delayed", "Low": "normal"}
 RISK_HEX = {"Critical": "#DC2626", "High": "#CA8A04", "Medium": "#CA8A04", "Low": "#16A34A", "On track": "#64748B"}
@@ -286,6 +287,17 @@ def restore_pref(key, options, multi=False):
     elif value not in options:
         return
     st.session_state[key] = value
+
+
+def style_figure(figure, height=None):
+    """Plotly in the DEPORT look: transparent background, Inter, quiet grid."""
+    ink, grid = ("#CBD5E1", "rgba(148,163,184,.14)") if is_dark() else ("#334155", "rgba(15,23,42,.08)")
+    figure.update_layout(template="plotly_dark" if is_dark() else "plotly_white", paper_bgcolor="rgba(0,0,0,0)",
+                         plot_bgcolor="rgba(0,0,0,0)", font=dict(family="Inter, sans-serif", color=ink),
+                         margin=dict(l=8, r=40, t=8, b=8), showlegend=False, **({"height": height} if height else {}))
+    figure.update_xaxes(showgrid=True, gridcolor=grid, zeroline=False)
+    figure.update_yaxes(showgrid=False)
+    return figure
 
 
 # ---------------------------------------------------------------- live refresh

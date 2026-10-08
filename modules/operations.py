@@ -314,6 +314,7 @@ def kpis(branch_id=None):
         "critical": sum(1 for v in labels.values() if v == "Critical"),
         "delayed": sum(1 for v in labels.values() if v in ("High", "Medium")),
         "free_vehicles": int((~vehicles["vehicle_id"].isin(pending["vehicle_id"])).sum()),
+        "unassigned": int((deliveries["status"] == "unassigned").sum()),
     }
 
 

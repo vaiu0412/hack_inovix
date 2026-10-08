@@ -123,6 +123,16 @@ def disruption_point(d, roads, shapes):
     return tuple(road_midpoint(pts)) if pts else None
 
 
+def add_tiles(m, switcher=True):
+    """Free, keyless basemaps. (CARTO Voyager/Positron/Dark Matter now need an API key, so Esri is used.)"""
+    folium.TileLayer(xyz.Esri.WorldStreetMap, name="Map", max_zoom=19).add_to(m)
+    if switcher:
+        folium.TileLayer(xyz.OpenStreetMap.Mapnik, name="Street", show=False).add_to(m)
+        folium.TileLayer(xyz.Esri.WorldGrayCanvas, name="Light", show=False).add_to(m)
+        folium.TileLayer(xyz.Esri.WorldImagery, name="Satellite", show=False).add_to(m)
+    return m
+
+
 def build(partners, deliveries, roads, disruptions=(), detour_roads=(), risk_labels=None, selected=None,
           states=None, focus=None, dark=False, zoom=13):
     """folium.Map for one branch (or one partner).
@@ -134,11 +144,7 @@ def build(partners, deliveries, roads, disruptions=(), detour_roads=(), risk_lab
     risk_labels, states = risk_labels or {}, states or {}
     shapes = store.route_geometry()
     m = folium.Map(location=COIMBATORE_CENTER, zoom_start=zoom, tiles=None, control_scale=True, scrollWheelZoom=False)
-    # CARTO basemaps (Voyager/Positron) now need an API key, so the keyless Esri street map is the default
-    folium.TileLayer(xyz.Esri.WorldStreetMap, name="Map", max_zoom=19).add_to(m)
-    folium.TileLayer(xyz.OpenStreetMap.Mapnik, name="Street", show=False).add_to(m)
-    folium.TileLayer(xyz.Esri.WorldGrayCanvas, name="Light", show=False).add_to(m)
-    folium.TileLayer(xyz.Esri.WorldImagery, name="Satellite", show=False).add_to(m)
+    add_tiles(m)
     m.get_root().header.add_child(folium.Element(MAP_CSS))
 
     blocked = {d.get("road_id") for d in disruptions if d.get("road_id") and d.get("type") != "breakdown"}
@@ -190,6 +196,11 @@ def build(partners, deliveries, roads, disruptions=(), detour_roads=(), risk_lab
 
     # delivery stops: numbered, coloured by risk
     for d in deliveries.to_dict("records"):
+        if not isinstance(d.get("vehicle_id"), str) or not d.get("vehicle_id"):  # new order, no partner yet
+            folium.Marker((d["lat"], d["lng"]), tooltip=f"{d['delivery_id']} · {d['customer']} · unassigned",
+                          icon=folium.DivIcon(html="<div class='dp-stop' style='background:#64748B'>+</div>",
+                                              icon_size=(20, 20), icon_anchor=(10, 10))).add_to(m)
+            continue
         is_done = d["status"] in ("delivered", "failed")
         label = "Delivered" if d["status"] == "delivered" else risk_labels.get(d["delivery_id"], "")
         colour = DONE if is_done else STATE[RISK_STATE.get(label, "normal")][1]

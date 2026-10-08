@@ -24,7 +24,12 @@ from modules.data_loader import (DATA_DIR, NOW_MIN, hhmm_to_min, load_all, load_
 from modules import geometry
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
+ORDER_COLUMNS = {  # work assignment (v6): who created / assigned / handled an order, and when
+    "created_by": "TEXT", "created_at": "TEXT", "assigned_at": "TEXT", "assigned_by": "TEXT", "accepted_at": "TEXT",
+    "picked_at": "TEXT", "delivered_at": "TEXT", "package_size": "TEXT DEFAULT 'small'", "category": "TEXT",
+    "notes": "TEXT DEFAULT ''", "proof_note": "TEXT DEFAULT ''"}
+SEED_SIZE = {"bike": "small", "car": "small", "van": "medium", "truck": "large"}
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS branches (
     branch_id TEXT PRIMARY KEY, name TEXT NOT NULL, city TEXT, area TEXT, address TEXT, lat REAL, lng REAL,
@@ -41,8 +46,13 @@ CREATE TABLE IF NOT EXISTS vehicles (
 CREATE TABLE IF NOT EXISTS deliveries (
     delivery_id TEXT PRIMARY KEY, customer TEXT, address_area TEXT, lat REAL, lng REAL,
     vehicle_id TEXT, road_id TEXT, stop_order INTEGER, planned_eta TEXT, deadline TEXT,
-    priority TEXT, customer_phone TEXT, status TEXT DEFAULT 'pending', original_vehicle TEXT,
-    note TEXT DEFAULT '', branch_id TEXT);
+    priority TEXT, customer_phone TEXT, status TEXT DEFAULT 'in_transit', original_vehicle TEXT,
+    note TEXT DEFAULT '', branch_id TEXT, created_by TEXT, created_at TEXT, assigned_at TEXT, assigned_by TEXT,
+    accepted_at TEXT, picked_at TEXT, delivered_at TEXT, package_size TEXT DEFAULT 'small', category TEXT,
+    notes TEXT DEFAULT '', proof_note TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS assignment_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_id TEXT NOT NULL, from_dp TEXT, to_dp TEXT, by_user TEXT,
+    reason TEXT, time TEXT, branch_id TEXT);
 CREATE TABLE IF NOT EXISTS issues (
     issue_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, partner_id TEXT, source TEXT,
     quick_type TEXT, text TEXT, audio BLOB, transcript TEXT, transcript_engine TEXT,
@@ -81,8 +91,9 @@ CREATE TABLE IF NOT EXISTS audit_log (
 """
 TABLES = ["branches", "roles", "permissions", "role_permissions", "partners", "vehicles", "deliveries", "issues",
           "disruptions", "messages", "events", "meta", "users", "sessions", "otp_codes", "audit_log",
-          "login_attempts", "drafts", "user_prefs"]
+          "login_attempts", "drafts", "user_prefs", "assignment_history"]
 BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events"]
+ACTIVE_DONE = ("delivered", "failed")
 JSON_FIELDS = {"problem", "plan"}
 OPEN_ISSUE_STATUSES = ("new", "analysed")
 
@@ -235,6 +246,8 @@ def init_db():
             _migrate_v4(conn)
         if current < 5:
             _migrate_v5(conn)
+        if current < 6:
+            _migrate_v6(conn)
         stamp = conn.execute("SELECT value FROM meta WHERE key = 'geometry_stamp'").fetchone()
         if not stamp or stamp["value"] != geometry.cache_stamp():  # the shapes file changed: reload it
             _seed_geometry(conn)
@@ -350,6 +363,20 @@ def _migrate_v5(conn):
     _set_version(conn, 5)
 
 
+def _migrate_v6(conn):
+    """Work assignment: order columns, assignment history, and the delivery flow. Stops that were simply
+    'pending' were already on their vehicle at 09:00, so they become 'in_transit'."""
+    have = _columns(conn, "deliveries")
+    for column, kind in ORDER_COLUMNS.items():
+        if column not in have:
+            conn.execute(f"ALTER TABLE deliveries ADD COLUMN {column} {kind}")
+    conn.execute("UPDATE deliveries SET status = 'in_transit' WHERE status = 'pending'")
+    conn.execute("UPDATE deliveries SET package_size = COALESCE((SELECT CASE v.type WHEN 'van' THEN 'medium' "
+                 "WHEN 'truck' THEN 'large' ELSE 'small' END FROM vehicles v WHERE v.vehicle_id = deliveries.vehicle_id), "
+                 "'small') WHERE package_size IS NULL OR package_size = ''")
+    _set_version(conn, 6)
+
+
 def _set_version(conn, version):
     conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE "
                  "SET value = excluded.value", (str(version),))
@@ -392,13 +419,16 @@ def reset_demo(backup=True):
             (v.vehicle_id, v.reg_no, v.type, v.status, v.current_lat, v.current_lng,
              "|".join(v.route_roads), int(v.capacity), v.branch_id) for v in vehicles.itertuples()])
         branch_of = dict(zip(vehicles["vehicle_id"], vehicles["branch_id"]))
+        type_of = dict(zip(vehicles["vehicle_id"], vehicles["type"]))
         conn.executemany(
             "INSERT INTO deliveries(delivery_id, customer, address_area, lat, lng, vehicle_id, road_id, "
-            "stop_order, planned_eta, deadline, priority, customer_phone, status, original_vehicle, branch_id) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)",
+            "stop_order, planned_eta, deadline, priority, customer_phone, status, original_vehicle, branch_id, "
+            "created_by, created_at, assigned_at, assigned_by, package_size) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'in_transit',?,?,'system',?,?,'system',?)",
             [(d.delivery_id, d.customer, d.address_area, d.lat, d.lng, d.vehicle_id, d.road_id,
               int(d.stop_order), d.planned_eta, d.deadline, d.priority, d.customer_phone, d.vehicle_id,
-              branch_of[d.vehicle_id]) for d in data["deliveries"].itertuples()])
+              branch_of[d.vehicle_id], now_iso(), now_iso(), SEED_SIZE.get(type_of[d.vehicle_id], "small"))
+             for d in data["deliveries"].itertuples()])
         _seed_users(conn)
         _seed_geometry(conn)
         for branch_id in partners["branch_id"].unique():
@@ -439,8 +469,9 @@ def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
     if not include_done:
         clauses.append("status NOT IN ('delivered', 'failed')")
     df = _df("SELECT * FROM deliveries" + _where(clauses) + " ORDER BY vehicle_id, stop_order", params)
-    df["eta_min"] = df["planned_eta"].apply(hhmm_to_min)
     df["deadline_min"] = df["deadline"].apply(hhmm_to_min)
+    # an unassigned order has no ETA yet: use its deadline so sorting and maths still work
+    df["eta_min"] = [hhmm_to_min(eta) if eta else due for eta, due in zip(df["planned_eta"], df["deadline_min"])]
     return df
 
 
@@ -459,8 +490,9 @@ def snapshot(branch_id=None):
     With a branch_id, ONLY that branch's vehicles and deliveries are included, so the impact engine
     and the recommender never touch another branch's routes, partners or backup vehicles.
     """
-    return {"roads": load_all()["roads"], "vehicles": vehicles_df(branch_id),
-            "deliveries": deliveries_df(include_done=False, branch_id=branch_id).reset_index(drop=True)}
+    deliveries = deliveries_df(include_done=False, branch_id=branch_id)
+    return {"roads": load_all()["roads"], "vehicles": vehicles_df(branch_id),  # unassigned orders are on no route
+            "deliveries": deliveries[deliveries["vehicle_id"].notna()].reset_index(drop=True)}
 
 
 def partners_df(branch_id=None):
@@ -508,6 +540,17 @@ def get_partner(partner_id, branch_id=None):
     df = partners_df(branch_id)
     match = df[df["partner_id"] == partner_id]
     return match.iloc[0].to_dict() if len(match) else None
+
+
+def assignment_history(delivery_id=None, branch_id=None, limit=200):
+    clauses, params = [], []
+    if delivery_id:
+        clauses.append("delivery_id = ?")
+        params.append(delivery_id)
+    if branch_id:
+        clauses.append("branch_id = ?")
+        params.append(branch_id)
+    return _df("SELECT * FROM assignment_history" + _where(clauses) + " ORDER BY id DESC LIMIT ?", (*params, limit))
 
 
 def _decode_issue(row):

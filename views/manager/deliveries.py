@@ -4,7 +4,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import guards, manager_ui as mui, store, ui
+from modules import assign, guards, manager_ui as mui, store, ui
 
 guards.require_role("branch_admin")
 ui.header("Deliveries")
@@ -13,17 +13,17 @@ ctx = mui.context()
 deliveries = store.deliveries_df(branch_id=ctx["branch_id"])
 risk = mui.risk_labels_now(ctx["open_issues"])
 partner_of = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
-state = deliveries.apply(lambda d: "done" if d["status"] == "delivered"
+state = deliveries.apply(lambda d: "done" if d["status"] == "delivered" else "unassigned" if d["status"] == "unassigned"
                          else ui.risk_state(risk.get(d["delivery_id"], "Low")), axis=1)
 deliveries = deliveries.assign(state=state, partner=deliveries["vehicle_id"].map(partner_of).fillna("—"))
 
-ui.restore_pref("del_state", ["normal", "delayed", "critical", "done"], multi=True)
+ui.restore_pref("del_state", ["normal", "delayed", "critical", "done", "unassigned"], multi=True)
 ui.restore_pref("del_priority", ["medical", "perishable", "express", "standard"], multi=True)
 ui.restore_pref("del_partner", [None] + sorted(set(partner_of.values())))
 with st.container(horizontal=True, vertical_alignment="center", gap="small"):
     query = st.text_input("Search", placeholder="Customer, area, ID", label_visibility="collapsed",
                           icon=":material/search:", width=240)
-    state_pick = st.pills("Status", ["normal", "delayed", "critical", "done"], selection_mode="multi",
+    state_pick = st.pills("Status", ["normal", "delayed", "critical", "done", "unassigned"], selection_mode="multi",
                           format_func=ui.status_text, label_visibility="collapsed", key="del_state")
     priority_pick = st.pills("Priority", ["medical", "perishable", "express", "standard"], selection_mode="multi",
                              format_func=str.capitalize, label_visibility="collapsed", key="del_priority")
@@ -43,8 +43,9 @@ if partner_pick:
 
 table = pd.DataFrame({"ID": view["delivery_id"], "Customer": view["customer"], "Area": view["address_area"],
                       "Priority": view["priority"].str.capitalize(), "Partner": view["partner"],
-                      "ETA": view["planned_eta"], "Due": view["deadline"], "Status": view["state"].map(ui.status_text),
-                      "Change": view["note"].fillna("").str.capitalize()})
+                      "Stage": view["status"].map(assign.STAGE).fillna(view["status"]),
+                      "ETA": view["planned_eta"].fillna("—"), "Due": view["deadline"],
+                      "Status": view["state"].map(ui.status_text), "Change": view["note"].fillna("").str.capitalize()})
 table_col, panel_col = st.columns([2.2, 1], gap="medium")
 with table_col:
     event = st.dataframe(table, hide_index=True, width="stretch", height=480, on_select="rerun",
@@ -60,11 +61,13 @@ with panel_col, ui.card("delivery_panel"):
         st.markdown(f"<p class='dp-h3'>{escape(d['customer'])}</p><p class='dp-small'>{escape(d['delivery_id'])} · "
                     f"{escape(d['address_area'])}</p><div style='margin:8px 0'>{ui.pill_html(d['state'])}</div>",
                     unsafe_allow_html=True)
-        st.markdown(ui.kv([("Priority", escape(d["priority"].capitalize())), ("Partner", escape(d["partner"])),
-                           ("Vehicle", escape(d["vehicle_id"])), ("Stop", int(d["stop_order"])),
-                           ("ETA", escape(d["planned_eta"])), ("Due", escape(d["deadline"])),
+        st.markdown(ui.kv([("Stage", escape(assign.STAGE.get(d["status"], d["status"]))),
+                           ("Priority", escape(d["priority"].capitalize())), ("Partner", escape(d["partner"])),
+                           ("Size", escape(str(d.get("package_size") or "small").capitalize())),
+                           ("ETA", escape(d["planned_eta"] or "—")), ("Due", escape(d["deadline"])),
                            ("Change", escape(str(d["note"] or "—").capitalize()))]), unsafe_allow_html=True)
         st.link_button("Call customer", f"tel:{d['customer_phone']}", icon=":material/call:", width="stretch")
+        mui.reassign_controls(ctx, d.to_dict())
 
 sms = store.customer_messages(branch_id=ctx["branch_id"])
 with st.expander(f"SMS sent ({len(sms)})", icon=":material/sms:"):

@@ -108,22 +108,20 @@ def route_road_options(dp_id, branch_id):
 
 
 # ---------------------------------------------------------------- writes (ownership checked)
-def mark_delivered(dp_id, branch_id, delivery_id):
-    """Mark one of the partner's own deliveries as delivered. PermissionError for anyone else's."""
-    partner, _ = _own(dp_id, branch_id)
-    owner = "vehicle_id = (SELECT vehicle_id FROM partners WHERE partner_id = ?) AND branch_id = ?"
-    with store.connect() as conn:
-        updated = conn.execute(f"UPDATE deliveries SET status = 'delivered' WHERE delivery_id = ? AND "
-                               f"status != 'delivered' AND {owner}", (delivery_id, dp_id, branch_id)).rowcount
-        owned = conn.execute(f"SELECT 1 FROM deliveries WHERE delivery_id = ? AND {owner}",
-                             (delivery_id, dp_id, branch_id)).fetchone()
-        if updated:
-            store._bump(conn)
-    if not owned:
-        raise PermissionError(f"Delivery {delivery_id} is not assigned to {dp_id}")
-    if updated:
-        store.log_event("delivery", f"{partner['name']} delivered {delivery_id}", branch_id=branch_id)
-    return bool(updated)
+def mark_delivered(dp_id, branch_id, delivery_id, note=""):
+    """Last step of the flow (only from 'on the way'). PermissionError for anyone else's delivery."""
+    _own(dp_id, branch_id)
+    from modules import assign
+
+    return assign.advance(dp_id, branch_id, delivery_id, "delivered", note)
+
+
+def advance_delivery(dp_id, branch_id, delivery_id, to_status, note=""):
+    """Accept -> Picked up -> Start -> Delivered, one step at a time, own deliveries only."""
+    _own(dp_id, branch_id)
+    from modules import assign
+
+    return assign.advance(dp_id, branch_id, delivery_id, to_status, note)
 
 
 def mark_notifications_read(dp_id, branch_id):

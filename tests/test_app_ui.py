@@ -211,3 +211,35 @@ def test_every_page_renders_with_an_open_alert(db):
         at = sign_in(identifier, password, super_console=console)
         for page in pages.values():
             ok(at.switch_page(page).run())
+
+
+def test_assign_work_end_to_end(db):
+    """Admin creates an order and assigns the best match; the partner sees New work and steps through it."""
+    from modules import assign
+
+    east = auth.get_user("east.admin")
+    order_id, _ = assign.create_order(east, "Anand Stores", "+91 90000 30001", "Gandhipuram", "Parcel", "standard",
+                                      "17:00", "small")
+    page = _page_as(guards.BRANCH_PAGES["assign"], east)
+    ok(page)
+    assert f"{order_id} · Anand Stores" in text_of(page) and "km away" in text_of(page)
+    click(page, "Assign best")
+    vehicle = store.deliveries_df().set_index("delivery_id").loc[order_id, "vehicle_id"]
+    dp = store.partners_df("CBE-E").set_index("vehicle_id").loc[vehicle, "partner_id"]
+
+    page = _page_as(guards.BRANCH_PAGES["assign"], east)                  # new order through the form
+    page.text_input[0].set_value("City Clinic")
+    page.text_input[1].set_value("+91 90000 30002")
+    page.text_input[2].set_value("rs puram")
+    click(page, "Save order")
+    assert "saved · RS Puram" in " ".join(s.value for s in page.success)
+    assert len(assign.unassigned_orders("CBE-E")) == 1
+
+    at = sign_in(dp, "Partner@123")
+    assert "New work · 1" in text_of(at) and order_id in text_of(at)
+    click(at, "Accept")
+    assert store.deliveries_df().set_index("delivery_id").loc[order_id, "status"] == "accepted"
+    at = continue_session(at)
+    ok(at.switch_page(guards.PARTNER_PAGES["deliveries"]).run())          # every stop with its next step
+    click(at, "Picked up")
+    assert store.deliveries_df().set_index("delivery_id").loc[order_id, "status"] == "picked_up"

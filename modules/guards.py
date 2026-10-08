@@ -25,6 +25,7 @@ SUPER_PAGES = {
 BRANCH_PAGES = {
     "command": "views/manager/command_center.py",
     "map": "views/manager/map_ops.py",
+    "assign": "views/manager/assign.py",
     "partners": "views/manager/partners.py",
     "deliveries": "views/manager/deliveries.py",
     "disruptions": "views/manager/disruptions.py",

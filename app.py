@@ -46,6 +46,7 @@ elif role == "branch_admin":
     pages = [
         st.Page(B["command"], title="Command Center", icon=":material/space_dashboard:", default=True),
         st.Page(B["map"], title="Live Map", icon=":material/map:"),
+        st.Page(B["assign"], title="Assign Work", icon=":material/assignment:"),
         st.Page(B["partners"], title="Partners", icon=":material/groups:"),
         st.Page(B["deliveries"], title="Deliveries", icon=":material/package_2:"),
         st.Page(B["disruptions"], title="Alerts", icon=":material/notifications_active:"),

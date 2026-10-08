@@ -16,6 +16,7 @@ QUICK_TYPES = {
     "closure": "Road blocked",
     "customer_unavailable": "Customer not available",
 }
+OPERATIONS = {"partner_id": "OPS", "name": "Operations desk", "vehicle_id": None}  # manager-logged issues
 TYPE_LABELS = {**QUICK_TYPES, "protest": "Protest", "requirement_change": "Change in plans", "unknown": "Other"}
 
 
@@ -23,8 +24,15 @@ def type_label(dtype):
     return TYPE_LABELS.get(dtype, str(dtype).replace("_", " ").capitalize())
 
 
+def reporter(partner_id):
+    """The partner who reports, or the operations desk for issues the manager logs."""
+    return store.get_partner(partner_id) or dict(OPERATIONS)
+
+
 def route_roads(partner, data):
     """The partner's own roads in driving order: the easiest places to pick from."""
+    if not partner or not partner.get("vehicle_id"):
+        return []
     vehicles = data["vehicles"].set_index("vehicle_id")
     roads = data["roads"].set_index("road_id")["name"]
     route = vehicles.loc[partner["vehicle_id"], "route_roads"] if partner["vehicle_id"] in vehicles.index else []
@@ -87,7 +95,7 @@ def set_location(problem, road_id, data):
 
 def preview(partner_id, text="", audio=None, quick_type=None):
     """What we understood (nothing is saved). Returns transcript, engine and problem."""
-    partner = store.get_partner(partner_id)
+    partner = reporter(partner_id)
     data = store.snapshot()
     transcript, engine = (text or "").strip(), "typed"
     if audio and not transcript:
@@ -114,6 +122,8 @@ def submit(partner_id, problem, transcript="", engine="typed", audio=None, quick
 
 
 def _next_delivery(partner):
+    if not partner.get("vehicle_id"):
+        return None
     deliveries = store.deliveries_df(partner["vehicle_id"], include_done=False)
     return deliveries.sort_values("eta_min").iloc[0] if len(deliveries) else None
 

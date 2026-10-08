@@ -1,81 +1,66 @@
-/* Ripple – dark theme with ocean accents */
-:root {
-  --ripple-accent: #22d3ee;
-  --ripple-accent-2: #6366f1;
-  --ripple-card: #111827;
-  --ripple-border: #1f2937;
-  --ripple-muted: #94a3b8;
-  --critical: #ef4444;
-  --high: #f97316;
-  --medium: #eab308;
-  --low: #22c55e;
-}
+/* Ripple – small additions on top of the Streamlit theme (.streamlit/config.toml).
+   Colours that must work in light AND dark mode use translucent greys or the status palette. */
 
-.block-container { padding-top: 1.6rem; max-width: 1400px; }
+.block-container { padding-top: 3.2rem; padding-bottom: 3rem; }
+[data-testid="stAppDeployButton"] { display: none; }
 
-/* ---------- header */
-.ripple-header {
-  background: linear-gradient(120deg, rgba(34,211,238,0.16), rgba(99,102,241,0.16));
-  border: 1px solid rgba(34,211,238,0.25);
-  border-radius: 16px;
-  padding: 18px 24px;
-  margin-bottom: 18px;
-  display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
-}
-.ripple-logo { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.5px; margin: 0; line-height: 1.1; }
-.ripple-logo span { background: linear-gradient(90deg, var(--ripple-accent), var(--ripple-accent-2));
-  -webkit-background-clip: text; background-clip: text; color: transparent; }
-.ripple-tagline { color: var(--ripple-muted); margin: 4px 0 0; font-size: 0.95rem; }
-.ripple-clock { font-family: ui-monospace, Consolas, monospace; background: rgba(15,23,42,0.6);
-  border: 1px solid var(--ripple-border); border-radius: 10px; padding: 8px 14px; white-space: nowrap; }
-.ripple-clock small { color: var(--ripple-muted); display: block; font-size: 0.7rem; }
-
-/* ---------- workflow steps */
-.ripple-steps { display: flex; gap: 8px; margin: -6px 0 16px; flex-wrap: wrap; }
-.ripple-step { font-size: 0.8rem; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--ripple-border);
-  color: var(--ripple-muted); }
-.ripple-step.active { border-color: var(--ripple-accent); color: var(--ripple-accent); background: rgba(34,211,238,0.08); }
-
-/* ---------- KPI cards */
-.kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-@media (max-width: 900px) { .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.kpi { background: var(--ripple-card); border: 1px solid var(--ripple-border); border-radius: 14px; padding: 14px 16px;
-  border-top: 3px solid var(--ripple-accent); }
-.kpi .label { color: var(--ripple-muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
-.kpi .value { font-size: 2rem; font-weight: 700; line-height: 1.2; }
-.kpi .sub { color: var(--ripple-muted); font-size: 0.78rem; }
-.kpi.warn { border-top-color: var(--high); }
-.kpi.danger { border-top-color: var(--critical); }
-.kpi.ok { border-top-color: var(--low); }
+/* ---------- page header */
+.rp-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px;
+  flex-wrap: wrap; margin: 0 0 14px; }
+.rp-title { font-size: 1.55rem; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; margin: 0; }
+.rp-sub { opacity: 0.68; font-size: 0.92rem; margin: 2px 0 0; }
+.rp-clock { font-size: 0.82rem; opacity: 0.75; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.rp-live { width: 8px; height: 8px; border-radius: 50%; background: #16A34A; display: inline-block;
+  box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.5); animation: rp-pulse 2s infinite; }
+@keyframes rp-pulse { 0% { box-shadow: 0 0 0 0 rgba(22,163,74,.45); } 70% { box-shadow: 0 0 0 7px rgba(22,163,74,0); }
+  100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); } }
 
 /* ---------- badges */
-.badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600;
-  color: #0b1120; }
-.badge.Critical { background: var(--critical); color: white; }
-.badge.High { background: var(--high); }
-.badge.Medium { background: var(--medium); }
-.badge.Low { background: var(--low); }
-.badge.neutral { background: #334155; color: #e2e8f0; }
+.rp-badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 0.74rem; font-weight: 600;
+  line-height: 1.6; border: 1px solid transparent; white-space: nowrap; vertical-align: middle; }
+.rp-critical { background: rgba(220, 38, 38, .12); color: #DC2626; border-color: rgba(220, 38, 38, .35); }
+.rp-high     { background: rgba(234, 88, 12, .12); color: #EA580C; border-color: rgba(234, 88, 12, .35); }
+.rp-medium   { background: rgba(202, 138, 4, .14); color: #B7791F; border-color: rgba(202, 138, 4, .38); }
+.rp-low      { background: rgba(22, 163, 74, .12); color: #16A34A; border-color: rgba(22, 163, 74, .35); }
+.rp-neutral  { background: rgba(128, 128, 128, .12); border-color: rgba(128, 128, 128, .28); }
+.rp-brand    { background: rgba(15, 118, 110, .12); color: #0F9488; border-color: rgba(15, 118, 110, .35); }
 
-/* ---------- parsed disruption + recommendation cards */
-.card { background: var(--ripple-card); border: 1px solid var(--ripple-border); border-radius: 14px;
-  padding: 14px 18px; margin-bottom: 12px; }
-.card h4 { margin: 0 0 6px; font-size: 1.02rem; }
-.card .why { color: #cbd5e1; font-size: 0.92rem; margin: 6px 0 10px; }
-.card .chips { display: flex; gap: 8px; flex-wrap: wrap; }
-.chip { font-size: 0.78rem; padding: 3px 10px; border-radius: 8px; background: #1e293b; color: #cbd5e1; }
-.card.reassign { border-left: 4px solid var(--critical); }
-.card.reroute { border-left: 4px solid var(--high); }
-.card.resequence { border-left: 4px solid var(--medium); }
-.card.reschedule_notify { border-left: 4px solid var(--low); }
+/* ---------- small key/value grid used in cards */
+.rp-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px 16px; margin: 4px 0 2px; }
+.rp-kv small { display: block; font-size: 0.72rem; opacity: 0.6; margin-bottom: 1px; }
+.rp-kv span { font-weight: 500; }
 
-.parsed-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 8px; }
-.parsed-grid div small { color: var(--ripple-muted); display: block; font-size: 0.72rem; text-transform: uppercase; }
+/* ---------- person line */
+.rp-person { display: flex; align-items: center; gap: 12px; }
+.rp-avatar { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 0.95rem; color: #fff; flex: none; }
+.rp-person b { font-size: 1.02rem; }
+.rp-person div small { opacity: 0.65; }
 
-/* ---------- before / after */
-.ba { display: flex; align-items: center; gap: 14px; font-size: 1.8rem; font-weight: 700; }
-.ba .arrow { color: var(--ripple-muted); font-size: 1.3rem; }
-.ba .after { color: var(--low); }
-.ba .before { color: var(--critical); }
+/* ---------- AI note */
+.rp-note { border-left: 3px solid #0F9488; padding: 8px 12px; margin: 6px 0 10px; border-radius: 0 8px 8px 0;
+  background: rgba(15, 118, 110, .07); font-size: 0.95rem; line-height: 1.5; }
+.rp-note b { display: block; font-size: 0.75rem; letter-spacing: .02em; opacity: .75; margin-bottom: 2px; }
 
-section[data-testid="stSidebar"] .stButton button { width: 100%; }
+/* ---------- quoted transcript */
+.rp-quote { font-style: italic; opacity: 0.85; border-left: 3px solid rgba(128,128,128,.35); padding: 2px 10px; margin: 4px 0 8px; }
+
+/* ---------- action rows */
+.rp-action { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid rgba(128,128,128,.18); }
+.rp-action:first-child { border-top: none; }
+.rp-action .rp-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; flex: none; }
+.rp-action small { opacity: 0.68; display: block; margin-top: 2px; }
+
+/* ---------- before -> after numbers */
+.rp-ba { font-size: 1.35rem; font-weight: 700; }
+.rp-ba .before { color: #DC2626; }
+.rp-ba .after { color: #16A34A; }
+.rp-ba .arrow { opacity: 0.45; margin: 0 6px; font-weight: 400; }
+
+/* ---------- phone-first tweaks */
+@media (max-width: 640px) {
+  .block-container { padding-left: 0.9rem; padding-right: 0.9rem; padding-top: 2.6rem; }
+  .rp-title { font-size: 1.3rem; }
+  div[data-testid="stMetricValue"] { font-size: 1.5rem; }
+  .stButton button, .stDownloadButton button { min-height: 44px; }
+}

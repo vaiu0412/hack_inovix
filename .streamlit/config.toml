@@ -1,12 +1,34 @@
 [theme]
-base = "dark"
-primaryColor = "#22d3ee"
-backgroundColor = "#0b1120"
-secondaryBackgroundColor = "#111827"
-textColor = "#e2e8f0"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+baseFontSize = 15
+baseRadius = "0.6rem"
+buttonRadius = "0.6rem"
+showWidgetBorder = true
+showSidebarBorder = true
+
+[theme.light]
+primaryColor = "#0F766E"
+backgroundColor = "#F6F7F9"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#111827"
+borderColor = "#E2E5EA"
+dataframeHeaderBackgroundColor = "#F1F3F6"
+linkColor = "#0F766E"
+
+[theme.dark]
+primaryColor = "#2DD4BF"
+backgroundColor = "#0D1117"
+secondaryBackgroundColor = "#161B22"
+textColor = "#E6EDF3"
+borderColor = "#2A313B"
+dataframeHeaderBackgroundColor = "#1B212A"
+linkColor = "#2DD4BF"
 
 [server]
 headless = true
 
 [browser]
 gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"

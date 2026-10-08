@@ -1,4 +1,4 @@
-"""Super Admin overview: every branch at a glance (summary level – no day-to-day operations)."""
+"""Overview: every branch at a glance (summary level – no day-to-day operations)."""
 from html import escape
 
 import plotly.graph_objects as go
@@ -7,49 +7,51 @@ import streamlit as st
 from modules import admin, guards, store, ui
 
 guards.require_permission("view_all_branches")
-ui.header("Overview", "All branches at a glance.")
-ui.live_updates()
+ui.header("Overview", "All branches")
 
 summary = store.branch_summaries()
 admins = admin.branch_admins_df()
-ui.kpi_row([
-    ("Branches", len(summary), None),
-    ("Active branches", int(summary["is_active"].sum()), None),
-    ("Branch admins", int(admins["is_active"].sum()), f"{len(admins)} total"),
-    ("Delivery partners", int(summary["partners"].sum()), None),
-    ("Deliveries today", int(summary["deliveries"].sum()), f"{int(summary['delivered'].sum())} delivered"),
-    ("Open critical", int(summary["critical"].sum()), "incidents"),
-], tile_width=150)
+critical = int(summary["critical"].sum())
+ui.kpi_cards([
+    ("store", len(summary), "Branches", f"{int(summary['is_active'].sum())} active", "navy"),
+    ("admin_panel_settings", int(admins["is_active"].sum()), "Admins", f"of {len(admins)}", None),
+    ("groups", int(summary["partners"].sum()), "Partners", None, None),
+    ("package_2", int(summary["deliveries"].sum()), "Deliveries", f"{int(summary['delivered'].sum())} done", None),
+    ("notifications_active", int(summary["open_issues"].sum()), "Open alerts", None,
+     "critical" if summary["open_issues"].sum() else "normal"),
+    ("emergency", critical, "Critical", None, "critical" if critical else "normal"),
+])
 
-st.markdown("##### Branches")
+ui.section("Branches", "store")
 columns = st.columns(3, gap="small")
 for i, b in enumerate(summary.to_dict("records")):
-    with columns[i % 3], st.container(border=True):
-        status = ui.badge("Active", "rp-low") if b["is_active"] else ui.badge("Inactive", "rp-neutral")
-        st.markdown(f"**{escape(b['name'])}** &nbsp;{status}<br><small>{b['branch_id']} · admin: "
-                    f"{escape(b['admin'])}</small>", unsafe_allow_html=True)
-        st.markdown(ui.kv([("Partners", b["partners"]), ("Deliveries", f"{b['delivered']} / {b['deliveries']}"),
+    with columns[i % 3], ui.card(f"branch_{b['branch_id']}"):
+        status = ui.pill_html("normal", "Active") if b["is_active"] else ui.pill_html("off", "Inactive")
+        st.markdown(f"<p class='dp-h3'>{escape(b['name'])}</p><p class='dp-small'>{b['branch_id']} · "
+                    f"{escape(b['admin'])}</p><div style='margin:8px 0'>{status}</div>", unsafe_allow_html=True)
+        st.markdown(ui.kv([("Partners", b["partners"]), ("Done", f"{b['delivered']} / {b['deliveries']}"),
                            ("Delayed", b["delayed"]),
-                           ("Critical", ui.risk_badge("Critical") + f" {b['critical']}" if b["critical"] else "0"),
-                           ("Open issues", b["open_issues"])]), unsafe_allow_html=True)
+                           ("Critical", ui.pill_html("critical", str(b["critical"])) if b["critical"] else "0"),
+                           ("Alerts", b["open_issues"])]), unsafe_allow_html=True)
 
-st.markdown("##### Deliveries today by branch")
-ink, grid = ("#E6EDF3", "rgba(230,237,243,.10)") if ui.is_dark() else ("#374151", "rgba(17,24,39,.08)")
+ui.section("Deliveries by branch", "bar_chart")
+ink, grid = ("#E6EDF3", "rgba(230,237,243,.10)") if ui.is_dark() else ("#334155", "rgba(15,23,42,.08)")
 chart = summary.sort_values("deliveries")
 figure = go.Figure(go.Bar(
     y=chart["name"], x=chart["deliveries"], orientation="h", marker=dict(color=ui.BRAND, cornerradius=4),
     width=0.5, text=chart["deliveries"], textposition="outside", textfont=dict(color=ink),
     customdata=chart[["delivered", "delayed", "critical"]],
-    hovertemplate="<b>%{y}</b><br>%{x} deliveries · %{customdata[0]} delivered<br>"
+    hovertemplate="<b>%{y}</b><br>%{x} deliveries · %{customdata[0]} done<br>"
                   "%{customdata[1]} delayed · %{customdata[2]} critical<extra></extra>",
 ))
 figure.update_layout(height=60 + 56 * len(chart), margin=dict(l=8, r=40, t=8, b=8), showlegend=False,
-                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color=ink),
+                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color=ink, family="Inter"),
                      xaxis=dict(showgrid=True, gridcolor=grid, zeroline=False, title=None),
                      yaxis=dict(showgrid=False, title=None))
-st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
-with st.expander("Table view"):
+with ui.card("chart"):
+    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+with st.expander("Table view", icon=":material/table:"):
     st.dataframe(summary.rename(columns={"branch_id": "ID", "name": "Branch", "area": "Area", "is_active": "Active",
                                          "admin": "Admin", "partners": "Partners", "deliveries": "Deliveries",
-                                         "delivered": "Delivered", "delayed": "Delayed", "critical": "Critical",
-                                         "open_issues": "Open issues"}), hide_index=True, width="stretch")
+                                         "delivered": "Done", "delayed": "Delayed", "critical": "Critical",
+                                         "open_issues": "Alerts"}), hide_index=True, width="stretch")

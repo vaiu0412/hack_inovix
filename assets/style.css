@@ -47,7 +47,7 @@
 .dp-card:hover, .dp-kpi:hover { transform: translateY(-2px); box-shadow: var(--dp-shadow-hover); }
 
 /* ---------- KPI tiles: icon chip + number (counts up, pure CSS) + label + trend */
-.dp-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; margin: 0 0 24px; }
+.dp-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 16px; margin: 0 0 24px; }
 .dp-kpi { background: var(--dp-card); border: 1px solid var(--dp-border); border-radius: var(--dp-radius);
   padding: 16px 18px; box-shadow: var(--dp-shadow); transition: transform .15s ease, box-shadow .15s ease; min-width: 0; }
 .dp-kpi .chip { width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center;
@@ -162,9 +162,11 @@
 .stButton button:active, .stFormSubmitButton button:active, .stLinkButton a:active { transform: translateY(1px) scale(.99); }
 
 /* ---------- report tiles (partner): big icon grid */
-[class*="st-key-tile_"] button { min-height: 84px !important; flex-direction: column; gap: 4px; border-radius: 14px; }
-[class*="st-key-tile_"] button p { font-size: 13px; font-weight: 600; }
-[class*="st-key-tile_"] button [data-testid="stIconMaterial"] { font-size: 26px; }
+[class*="st-key-tile_"] button { min-height: 84px !important; border-radius: 14px; padding: 8px 4px; }
+[class*="st-key-tile_"] button > div > span { flex-direction: column; gap: 6px; align-items: center; }
+[class*="st-key-tile_"] button p { font-size: 12.5px; font-weight: 600; line-height: 1.2; text-align: center;
+  white-space: normal; overflow-wrap: normal; word-break: keep-all; }
+[class*="st-key-tile_"] button [data-testid="stIconMaterial"] { font-size: 26px; margin: 0 !important; }
 
 /* ---------- older helpers still used in a few places */
 .rp-badge { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600;

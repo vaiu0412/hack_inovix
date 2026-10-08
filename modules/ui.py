@@ -225,9 +225,10 @@ def progress_ring(done, total, size=84):
     r, c = 34, 2 * 3.14159 * 34
     return (f'<div class="dp-ring"><svg width="{size}" height="{size}" viewBox="0 0 84 84" role="img" '
             f'aria-label="{done} of {total} delivered"><circle cx="42" cy="42" r="{r}" fill="none" '
-            f'stroke="var(--dp-border)" stroke-width="9"/><circle cx="42" cy="42" r="{r}" fill="none" '
-            f'stroke="#16A34A" stroke-width="9" stroke-linecap="round" stroke-dasharray="{c * share:.1f} {c:.1f}" '
-            f'transform="rotate(-90 42 42)"/><text x="42" y="47" text-anchor="middle" font-size="17" font-weight="750" '
+            f'stroke="var(--dp-border)" stroke-width="9"/>'
+            + (f'<circle cx="42" cy="42" r="{r}" fill="none" stroke="#16A34A" stroke-width="9" stroke-linecap="round" '
+               f'stroke-dasharray="{c * share:.1f} {c:.1f}" transform="rotate(-90 42 42)"/>' if done else "")
+            + f'<text x="42" y="47" text-anchor="middle" font-size="17" font-weight="750" '
             f'fill="var(--dp-text)">{done}/{total}</text></svg><div><div class="n">{done} of {total}</div>'
             f'<div class="dp-small">delivered</div></div></div>')
 
@@ -260,7 +261,11 @@ def resume_live_updates():
 
 
 def live_updates(every="4s"):
-    """Re-run the page when anything changes in the shared database (another device acted)."""
+    """Re-run the page when anything changes in the shared database (another device acted).
+
+    Called once by app.py for every signed-in page, always at the same place in the sidebar: a timed
+    fragment that sits at a different spot on each page can fire while the next page is being built
+    (Streamlit then fails with 'Bad delta path index')."""
     st.session_state["_seen_version"] = store.version()
 
     @st.fragment(run_every=every)
@@ -268,9 +273,10 @@ def live_updates(every="4s"):
         if time.time() < st.session_state.get("_pause_until", 0):
             return
         if store.version() != st.session_state.get("_seen_version"):
-            st.rerun()
+            st.rerun(scope="app")
 
-    _watch()
+    with st.sidebar:
+        _watch()
 
 
 # ---------------------------------------------------------------- sidebar

@@ -101,9 +101,12 @@ def test_super_admin_pages(db):
 def test_branch_admin_pages_are_scoped(db):
     at = sign_in("East.Admin@deport.in", "Admin@123")
     assert at.session_state["branch_id"] == "CBE-E" and "Coimbatore East" in text_of(at)
-    assert "Murugan" in text_of(at) and "Priya" not in text_of(at)          # Priya works in Central
+    assert "Partners active" in text_of(at) and "No alerts. All routes clear." in text_of(at)
     for page in guards.BRANCH_PAGES.values():
         ok(at.switch_page(page).run())
+    at.switch_page(guards.BRANCH_PAGES["partners"]).run()
+    team = set(at.dataframe[0].value["ID"])
+    assert team == {"DP101", "DP102", "DP103", "DP106"}                    # DP104 (Priya) works in Central
 
 
 def test_partner_pages(db):
@@ -152,7 +155,7 @@ def test_branch_admin_adds_partner(db):
     ok(page.run())
     page.text_input(key="ap_name_0").set_value("Ravi")
     page.text_input(key="ap_phone_0").set_value("+91 90000 20007")
-    click(page, "Add delivery partner")
+    click(page, "Add partner")
     team = store.partners_df("CBE-E").set_index("partner_id")
     assert "DP107" in team.index and team.loc["DP107", "vehicle_id"] == "V9"
     shown = [c.value for c in page.code] + [m.value for m in page.markdown]  # success card + one-time password
@@ -168,26 +171,43 @@ def test_full_demo_flow(db):
     at.text_area[0].set_value("avinasi rd la accident, full block, rendu mani neram aagum").run()
     click(at, "Check")
     assert "Accident · Avinashi Road" in text_of(at)
-    click(at, "Send to manager")
+    click(at, "Send")
     [issue] = store.list_issues()
     assert issue["partner_id"] == "DP102" and issue["branch_id"] == "CBE-E" and issue["status"] == "analysed"
     logout(at)
 
     # Central's admin sees nothing; East's admin sees the critical alert and accepts
-    assert "waiting for your decision" not in text_of(sign_in("central.admin@deport.in", "Admin@123"))
+    assert "DP102 · Accident" not in text_of(sign_in("central.admin@deport.in", "Admin@123"))
     at = sign_in("east.admin@deport.in", "Admin@123")
-    assert "waiting for your decision" in text_of(at) and "Critical" in text_of(at)
-    at.switch_page(guards.BRANCH_PAGES["disruptions"]).run()
+    assert "DP102 · Accident · Avinashi Rd · 9 deliveries hit" in text_of(at)          # the alert banner
+    ok(at.switch_page(guards.BRANCH_PAGES["disruptions"]).run())
+    assert "What changed" in text_of(at) and "What to do" in text_of(at)
     click(at, "Accept plan")
+    assert "Plan applied." in text_of(at)
     assert store.get_issue(issue["issue_id"])["status"] == "accepted"
     assert store.deliveries_df().set_index("delivery_id").loc["D06", "vehicle_id"] == "V6"   # same-branch backup
     logout(at)
 
     # DP102 sees the instruction; DP106 (backup van, same branch) has the new pickups
     at = sign_in("DP102", "Partner@123")
-    assert "New instructions" in text_of(at) and "avoid Avinashi Road" in text_of(at)
+    assert "Route changed" in text_of(at) and "avoid Avinashi Road" in text_of(at)
     at = sign_in("DP106", "Partner@123")
     at.switch_page(guards.PARTNER_PAGES["deliveries"]).run()
     page = text_of(at)
     assert "KMCH Hospital" in page and "FreshMart Dairy" in page and "Ukkadam Wholesale" not in page
     assert store.list_issues(branch_id="CBE-S") == [] and store.list_issues(branch_id="CBE-C") == []
+
+
+def test_every_page_renders_with_an_open_alert(db):
+    """Each page of each role, while an alert is open (maps, Ripple Impact graph, 3 steps)."""
+    from modules import partner_scope as scope
+
+    seen = scope.preview_issue("DP102", "CBE-E", text="avinashi road accident, full block, 2 hours")
+    scope.report_issue("DP102", "CBE-E", seen["problem"], transcript=seen["transcript"])
+    for identifier, password, pages, console in (
+            ("east.admin@deport.in", "Admin@123", guards.BRANCH_PAGES, False),
+            ("DP102", "Partner@123", guards.PARTNER_PAGES, False),
+            ("superadmin@deport.in", "Super@123", guards.SUPER_PAGES, True)):
+        at = sign_in(identifier, password, super_console=console)
+        for page in pages.values():
+            ok(at.switch_page(page).run())

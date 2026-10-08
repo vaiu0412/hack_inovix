@@ -1,10 +1,10 @@
-"""'Report a problem' flow shared by the partner app and the manager's 'Log an issue'.
+"""'Report' flow shared by the partner app and the branch admin's 'Log issue'.
 
-1. tap a quick type, record a voice note, or type     2. "Check" -> what we understood
-3. fix the place if needed                              4. "Send" -> manager gets problem + AI plan
+1. tap one of 9 big tiles, record a voice note, or type     2. Check -> "We understood:"
+3. pick the road if no place was found                       4. Send -> the branch admin gets an alert + AI plan
 
 Partners go through modules/partner_scope (only their own data, reports always filed as
-themselves); the manager's 'Log an issue' uses the operations-wide functions.
+themselves); the branch admin's 'Log issue' uses the branch-scoped functions.
 """
 from html import escape
 
@@ -13,6 +13,20 @@ import streamlit as st
 from modules import issues, ui
 from modules.data_loader import load_all
 from modules.voice import available_engines
+
+# (tile key, label, icon, quick type sent to the parser)
+TILES = [
+    ("accident", "Accident", ":material/car_crash:", "accident"),
+    ("traffic", "Traffic", ":material/traffic:", "traffic"),
+    ("closure", "Road blocked", ":material/block:", "closure"),
+    ("flood", "Flooding", ":material/flood:", "flood"),
+    ("breakdown", "Breakdown", ":material/car_repair:", "breakdown"),
+    ("puncture", "Flat tyre", ":material/tire_repair:", "breakdown"),
+    ("protest", "Protest", ":material/campaign:", "protest"),
+    ("customer", "Customer away", ":material/person_off:", "customer_unavailable"),
+    ("other", "Other", ":material/more_horiz:", "unknown"),
+]
+QUICK_OF = {key: quick for key, _, _, quick in TILES}
 
 
 def _backend(reporter_id, source, branch_id):
@@ -29,13 +43,17 @@ def _backend(reporter_id, source, branch_id):
             lambda: list(zip(roads["road_id"], roads["name"])))
 
 
+def _round(prefix):
+    return st.session_state.get(f"{prefix}_round", 0)
+
+
 def _key(prefix, name):
     """Widget keys include a counter so the form can be cleared after sending."""
-    return f"{prefix}_{name}_{st.session_state.get(f'{prefix}_round', 0)}"
+    return f"{prefix}_{name}_{_round(prefix)}"
 
 
 def _clear(prefix):
-    st.session_state[f"{prefix}_round"] = st.session_state.get(f"{prefix}_round", 0) + 1
+    st.session_state[f"{prefix}_round"] = _round(prefix) + 1
     st.session_state.pop(f"{prefix}_preview", None)
     ui.resume_live_updates()
 
@@ -43,20 +61,28 @@ def _clear(prefix):
 def report_form(partner_id, branch_id, prefix="report", source="partner"):
     """Draw the form. Returns the new issue id right after sending, else None."""
     preview_fn, submit_fn, road_options_fn = _backend(partner_id, source, branch_id)
-    quick = st.pills("What happened?", list(issues.QUICK_TYPES), format_func=issues.QUICK_TYPES.get,
-                     key=_key(prefix, "quick"))
-    audio = st.audio_input("Voice note (Tamil, English or both)", key=_key(prefix, "audio"))
-    text = st.text_area("Or type it", key=_key(prefix, "text"), height=80,
-                        placeholder="e.g. Avinashi road la accident, rendu mani neram block")
-    engines = available_engines()
-    st.caption("Voice is understood by " + (engines[0] if engines else "no engine right now – please type")
-               + ". Place names can be misspelled.")
+    picked_key = _key(prefix, "tile")
+    picked = st.session_state.get(picked_key)
 
-    if st.button("Check", type="primary", width="stretch", key=_key(prefix, "check"),
-                 icon=":material/fact_check:", disabled=not (audio or text.strip() or quick)):
+    st.markdown("<p class='dp-h3' style='margin-bottom:8px'>What happened?</p>", unsafe_allow_html=True)
+    with st.container(horizontal=True, gap="small"):
+        for key, label, icon, _ in TILES:
+            if st.button(label, icon=icon, key=f"tile_{prefix}_{key}_{_round(prefix)}", width=92,
+                         type="primary" if picked == key else "secondary"):
+                st.session_state[picked_key] = None if picked == key else key
+                st.rerun()
+    quick = QUICK_OF.get(picked)
+    audio = st.audio_input("Record voice", key=_key(prefix, "audio"))
+    text = st.text_area("Or type", key=_key(prefix, "text"), height=80,
+                        placeholder="Avinashi road la accident, rendu mani neram block")
+    engines = available_engines()
+    st.caption(f"Tamil, English or both · {engines[0] if engines else 'type one line'}")
+
+    if st.button("Check", type="primary", width="stretch", key=_key(prefix, "check"), icon=":material/fact_check:",
+                 disabled=not (audio or text.strip() or quick)):
         audio_bytes = audio.getvalue() if audio else None
         ui.pause_live_updates()  # keep the preview on screen until it is sent
-        with st.spinner("Listening and understanding…"):
+        with st.spinner("Listening…"):
             result = preview_fn(text=text, audio=audio_bytes, quick_type=quick)
         st.session_state[f"{prefix}_preview"] = {**result, "audio": audio_bytes, "quick": quick}
 
@@ -64,32 +90,27 @@ def report_form(partner_id, branch_id, prefix="report", source="partner"):
     if not preview:
         return None
     if preview["engine"] == "not understood":
-        st.warning("We couldn't make out the voice note. Type one line instead – the recording is kept.",
-                   icon=":material/hearing_disabled:")
+        st.warning("Voice not clear. Type one line.", icon=":material/hearing_disabled:")
     problem = preview["problem"]
     if not problem:
         return None
 
-    with st.container(border=True):
-        st.markdown("**We understood**")
+    with ui.card(f"understood_{prefix}"):
+        st.markdown("<p class='dp-h3'>We understood:</p>", unsafe_allow_html=True)
         if preview["transcript"]:
-            st.markdown(f'<div class="rp-quote">“{escape(preview["transcript"])}”</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="dp-quote">“{escape(preview["transcript"])}”</div>', unsafe_allow_html=True)
         if problem.get("needs_location"):
             options = road_options_fn()  # own roads first for partners
             names = dict(options)
-            st.markdown("**Where is it?** Tap the road:")
-            road = st.pills("Road", [r for r, _ in options], format_func=names.get, key=_key(prefix, "road"),
-                            label_visibility="collapsed")
+            road = st.pills("Where?", [r for r, _ in options], format_func=names.get, key=_key(prefix, "road"))
             if road:
                 problem = issues.set_location(problem, road, {"roads": load_all()["roads"]})
                 preview["problem"] = problem
-        st.markdown(f"**{problem['summary']}**")
-        if problem.get("suggestions") and not problem.get("needs_location"):
-            st.caption("Also possible: " + ", ".join(problem["suggestions"]))
-
+        st.markdown(f"<p style='font-size:16px;font-weight:650;margin:4px 0 12px'>{escape(problem['summary'])}</p>",
+                    unsafe_allow_html=True)
         send, again = st.columns(2)
-        if send.button("Send to manager", type="primary", width="stretch", icon=":material/send:",
-                       key=_key(prefix, "send"), disabled=problem.get("needs_location", False)):
+        if send.button("Send", type="primary", width="stretch", icon=":material/send:", key=_key(prefix, "send"),
+                       disabled=problem.get("needs_location", False)):
             issue_id = submit_fn(problem, transcript=preview["transcript"], engine=preview["engine"],
                                  audio=preview["audio"], quick_type=preview["quick"])
             _clear(prefix)

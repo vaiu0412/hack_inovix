@@ -296,18 +296,24 @@ def kpis(branch_id=None):
     partners = store.partners_df(branch_id)
     deliveries = store.deliveries_df(branch_id=branch_id)
     open_issues = store.list_issues(store.OPEN_ISSUE_STATUSES, branch_id=branch_id)
-    at_risk = set()
+    at_risk, labels = set(), {}
     for issue in open_issues:
         for row in (issue.get("plan") or {}).get("risk", []):
+            labels.setdefault(row["delivery_id"], row["risk_label"])
             if row["risk_label"] in ("Critical", "High"):
                 at_risk.add(row["delivery_id"])
     accepted = store.list_issues(("accepted",), branch_id=branch_id)
     saved = sum((i["plan"].get("before_after") or {}).get("misses_before", 0) -
                 (i["plan"].get("before_after") or {}).get("misses_after", 0) for i in accepted if i.get("plan"))
+    pending = deliveries[~deliveries["status"].isin(["delivered", "failed"])]
+    vehicles = store.vehicles_df(branch_id)
     return {
         "on_duty": int((partners["status"] == "on_duty").sum()), "partners": len(partners),
         "deliveries": len(deliveries), "delivered": int((deliveries["status"] == "delivered").sum()),
         "at_risk": len(at_risk), "open_issues": len(open_issues), "deadlines_saved": int(saved),
+        "critical": sum(1 for v in labels.values() if v == "Critical"),
+        "delayed": sum(1 for v in labels.values() if v in ("High", "Medium")),
+        "free_vehicles": int((~vehicles["vehicle_id"].isin(pending["vehicle_id"])).sum()),
     }
 
 

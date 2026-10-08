@@ -32,6 +32,10 @@ def go(page_key):
     st.switch_page(guards.BRANCH_PAGES[page_key])
 
 
+def short_road(name):
+    return str(name or "").replace(" Road", " Rd").replace(" Stretch", "")
+
+
 def risk_labels_now(open_issues):
     """Delivery -> risk label from every plan still waiting for a decision."""
     labels = {}
@@ -42,42 +46,76 @@ def risk_labels_now(open_issues):
 
 
 def kpi_tiles(ctx):
-    kpi = operations.kpis(ctx["branch_id"])
-    ui.kpi_row([
-        ("Partners on duty", f"{kpi['on_duty']} / {kpi['partners']}", None),
-        ("Deliveries today", kpi["deliveries"], f"{kpi['delivered']} delivered"),
-        ("At risk now", kpi["at_risk"], None),
-        ("Open issues", kpi["open_issues"], None),
-        ("Deadlines saved", kpi["deadlines_saved"], "today"),
+    """Six cards: Partners active, Deliveries, Delayed, Critical, Open alerts, Free vehicles."""
+    k = operations.kpis(ctx["branch_id"])
+    ui.kpi_cards([
+        ("groups", k["on_duty"], "Partners active", f"of {k['partners']}", "navy"),
+        ("package_2", k["deliveries"], "Deliveries", f"{k['delivered']} done", None),
+        ("schedule", k["delayed"], "Delayed", "at risk now" if k["delayed"] else "on time", "delayed"),
+        ("emergency", k["critical"], "Critical", "act now" if k["critical"] else
+         f"{k['deadlines_saved']} saved today" if k["deadlines_saved"] else "none", "critical"),
+        ("notifications_active", k["open_issues"], "Open alerts",
+         "needs review" if k["open_issues"] else "all clear", "critical" if k["open_issues"] else "normal"),
+        ("local_shipping", k["free_vehicles"], "Free vehicles", "ready", "normal"),
     ])
 
 
+def alert_line(ctx, issue):
+    """'DP102 · Accident · Avinashi Rd · 9 deliveries hit'"""
+    problem, plan = issue.get("problem") or {}, issue.get("plan") or {}
+    who = issue["partner_id"] if issue["partner_id"] in ctx["partner_names"] else "Desk"
+    parts = [who, issues.type_label(problem.get("type"))]
+    if problem.get("road_name"):
+        parts.append(short_road(problem["road_name"]))
+    hit = (plan.get("summary") or {}).get("affected_deliveries")
+    if hit:
+        parts.append(f"{hit} deliveries hit")
+    elif plan.get("kind") == "needs_location":
+        parts.append("needs place")
+    return " · ".join(parts)
+
+
 def alert_banner(ctx):
+    """Only when an alert is open: red banner + Review."""
     open_issues = ctx["open_issues"]
     if not open_issues:
         return
-    newest = open_issues[0]
-    who = ctx["partner_names"].get(newest["partner_id"], "Operations desk")
-    with st.container(border=True):
-        text_col, button_col = st.columns([4, 1], vertical_alignment="center")
-        text_col.markdown(f":material/error: **{len(open_issues)} issue{'s' if len(open_issues) > 1 else ''} "
-                          f"waiting for your decision** · latest from {who}: {newest['summary']}")
-        if button_col.button("Review", type="primary", width="stretch", key="alert_review"):
+    more = f'<span class="sep">·</span> +{len(open_issues) - 1} more' if len(open_issues) > 1 else ""
+    with st.container(key="alert_banner", horizontal=True, vertical_alignment="center"):
+        st.markdown(f'<div class="dp-alert">🔴 {escape(alert_line(ctx, open_issues[0]))} {more}</div>',
+                    unsafe_allow_html=True)
+        if st.button("Review", type="primary", key="alert_review", icon=":material/arrow_forward:"):
             go("disruptions")
+
+
+def at_risk_rows(ctx, limit=5):
+    rows = []
+    drivers = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
+    order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+    for issue in ctx["open_issues"]:
+        rows += (issue.get("plan") or {}).get("risk", [])
+    rows = sorted({r["delivery_id"]: r for r in rows}.values(), key=lambda r: (order.get(r["risk_label"], 9),
+                                                                               r["slack_min"]))
+    html = []
+    for r in rows[:limit]:
+        timing = f"late {-r['slack_min']} min" if r["slack_min"] < 0 else f"{r['slack_min']} min left"
+        html.append(f"<div class='dp-row'><div class='main'><b>{escape(r['customer'])}</b><small>"
+                    f"{escape(r['priority'].capitalize())} · {drivers.get(r['vehicle_id'], r['vehicle_id'])} · "
+                    f"due {r['deadline']}</small></div><div class='end'>{ui.risk_badge(r['risk_label'])}"
+                    f"<br><small>{timing}</small></div></div>")
+    return "".join(html)
 
 
 def ai_status_line():
     ai = llm_status()
     if not ai["available"]:
-        st.caption(":material/smart_toy: AI: no key set – rule-based mode (everything still works).")
+        st.caption(":material/smart_toy: AI: rules mode (no key).")
     elif ai["error"] and (not ai["ok_at"] or ai["error_at"] >= ai["ok_at"]):
-        wait = f" for about {ai['paused_sec'] // 60 + 1} more min" if ai["paused_sec"] else ""
-        st.caption(f":material/smart_toy: AI: last call failed at {ai['error_at']} – using rules{wait}. "
-                   f"Reason: {ai['error']}")
+        st.caption(f":material/smart_toy: AI: rules mode since {ai['error_at']}.")
     elif ai["ok_at"]:
-        st.caption(f":material/smart_toy: AI: {ai['provider']} · {ai['model']} · last answer at {ai['ok_at']}")
+        st.caption(f":material/smart_toy: AI: {ai['provider']} · last answer {ai['ok_at']}")
     else:
-        st.caption(":material/smart_toy: AI: key found, not used yet in this session of the server.")
+        st.caption(":material/smart_toy: AI: ready.")
 
 
 # ---------------------------------------------------------------- map + partners
@@ -216,33 +254,37 @@ def partner_panel(ctx, pid):
             st.rerun()
 
 
+# ---------------------------------------------------------------- partners table
 def team_table(ctx):
-    partners = ctx["partners"]
-    search_col, status_col = st.columns([2, 3], vertical_alignment="bottom")
-    query = search_col.text_input("Search", placeholder="Search name, ID, vehicle or area",
-                                  label_visibility="collapsed")
-    statuses = status_col.pills("Status", list(ui.PARTNER_STATUS), selection_mode="multi",
-                                format_func=lambda s: ui.PARTNER_STATUS[s][0], label_visibility="collapsed")
-    view = partners.copy()
+    """Short columns, coloured status, search + 3 filters; a selected row opens the side panel."""
+    partners, states = ctx["partners"], ctx["states"]
+    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+        query = st.text_input("Search", placeholder="Search name, ID, area", label_visibility="collapsed",
+                              icon=":material/search:", width=260)
+        status_pick = st.pills("Status", ["normal", "delayed", "critical", "available", "break"], selection_mode="multi",
+                               format_func=ui.status_text, label_visibility="collapsed", key="team_status")
+        kind_pick = st.pills("Vehicle", sorted(partners["vehicle_type"].unique()), selection_mode="multi",
+                             format_func=lambda k: f"{ui.VEHICLE_EMOJI.get(k, '')} {k.title()}",
+                             label_visibility="collapsed", key="team_kind")
+        alerts_only = st.toggle("Has alert", key="team_alerts")
+    view = partners.assign(state=partners["partner_id"].map(states))
     if query:
-        hay = (view["name"] + " " + view["partner_id"] + " " + view["vehicle_id"] + " " + view["reg_no"] + " "
-               + view["area"]).str.lower()
+        hay = (view["name"] + " " + view["partner_id"] + " " + view["vehicle_id"] + " " + view["area"]).str.lower()
         view = view[hay.str.contains(query.lower(), regex=False)]
-    if statuses:
-        view = view[view["status"].isin(statuses)]
-    view = view.assign(status_text=view["status"].map(lambda s: ui.PARTNER_STATUS.get(s, (s,))[0]),
-                       progress=(view["delivered"] / view["assigned"].where(view["assigned"] > 0)).fillna(0))
-    columns = {"partner_id": "Partner ID", "name": "Name", "status_text": "Status", "vehicle_id": "Vehicle",
-               "reg_no": "Reg. no", "vehicle_type": "Type", "area": "Near", "assigned": "Assigned",
-               "delivered": "Delivered", "pending": "Pending", "progress": "Progress", "urgent": "Urgent",
-               "next_stop": "Next stop", "next_eta": "Next ETA", "open_issues": "Open issues", "phone": "Phone",
-               "shift": "Shift", "rating": "Rating"}
-    event = st.dataframe(
-        view[list(columns)].rename(columns=columns), hide_index=True, width="stretch",
-        on_select="rerun", selection_mode="single-row", key="team_table",
-        column_config={"Progress": st.column_config.ProgressColumn(format="percent", min_value=0, max_value=1),
-                       "Rating": st.column_config.NumberColumn(format="%.1f")},
-    )
+    if status_pick:
+        view = view[view["state"].isin(status_pick)]
+    if kind_pick:
+        view = view[view["vehicle_type"].isin(kind_pick)]
+    if alerts_only:
+        view = view[view["open_issues"] > 0]
+    table = pd.DataFrame({
+        "ID": view["partner_id"], "Name": view["name"], "Status": view["state"].map(ui.status_text),
+        "Vehicle": view["vehicle_type"].map(ui.VEHICLE_EMOJI).fillna("") + " " + view["vehicle_id"],
+        "Area": view["area"], "Done": view["delivered"], "Left": view["pending"], "Next ETA": view["next_eta"],
+        "Phone": view["phone"],
+    })
+    event = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
+                         key="team_table", height=min(38 * (len(table) + 1) + 3, 420))
     rows = event.selection.rows if event else []
     pid = view.iloc[rows[0]]["partner_id"] if rows else None
     if pid and pid != st.session_state.get("_last_table_pick"):
@@ -250,140 +292,178 @@ def team_table(ctx):
         if pid != st.session_state.get("selected_partner"):
             st.session_state["selected_partner"] = pid
             st.rerun()
-    st.download_button("Download delivery partners (CSV)",
-                       view[list(columns)].rename(columns=columns).to_csv(index=False),
-                       "ripple-delivery-partners.csv", "text/csv", icon=":material/download:")
+    st.download_button("Download CSV", table.to_csv(index=False), "deport-partners.csv", "text/csv",
+                       icon=":material/download:")
 
 
-# ---------------------------------------------------------------- disruptions
-@st.dialog("Log an issue", width="large")
+# ---------------------------------------------------------------- alerts
+@st.dialog("Log issue", width="large")
 def log_issue_dialog(ctx):
-    st.caption("For problems you hear about by phone or see yourself. Pick who is affected, or Operations desk.")
-    reporter = st.selectbox("Reported by", ["OPS"] + ctx["partners"]["partner_id"].tolist(),
-                            format_func=lambda pid: "Operations desk" if pid == "OPS"
-                            else f"{ctx['partner_names'][pid]} · {pid}")
+    reporter = st.selectbox("For", ["OPS"] + ctx["partners"]["partner_id"].tolist(),
+                            format_func=lambda pid: "Ops desk" if pid == "OPS" else f"{pid} · {ctx['partner_names'][pid]}")
     issue_id = report_form(reporter, ctx["branch_id"], prefix=f"mgr_{reporter}", source="manager")
     if issue_id:
         st.rerun()
 
 
-def correct_issue(ctx, issue):
+def modify_form(ctx, issue, where="top"):
+    """Correct what the AI understood, then the plan is rebuilt."""
     problem, road_names = issue["problem"], ctx["road_names"]
     types = list(issues.QUICK_TYPES) + ["protest"]
-    with st.form(f"correct_{issue['issue_id']}", border=False):
+    with st.form(f"correct_{issue['issue_id']}_{where}", border=False):
         c1, c2 = st.columns(2)
         dtype = c1.selectbox("Type", types, index=types.index(problem["type"]) if problem["type"] in types else 0,
                              format_func=issues.type_label)
         road_ids = list(road_names)
         road = c2.selectbox("Road", road_ids,
                             index=road_ids.index(problem["road_id"]) if problem.get("road_id") in road_ids else None,
-                            format_func=road_names.get, placeholder="Choose the road")
+                            format_func=road_names.get, placeholder="Pick road")
         c3, c4 = st.columns(2)
-        severity = c3.selectbox("Severity", SEVERITIES, index=SEVERITIES.index(problem.get("severity", "medium")))
-        minutes = c4.number_input("Duration (min)", 0, 600, int(problem.get("duration_min") or 0), step=15)
+        severity = c3.selectbox("Severity", SEVERITIES, index=SEVERITIES.index(problem.get("severity", "medium")),
+                                format_func=str.capitalize)
+        minutes = c4.number_input("Minutes", 0, 600, int(problem.get("duration_min") or 0), step=15)
         if st.form_submit_button("Save and re-plan", type="primary", width="stretch"):
             operations.edit_problem(issue["issue_id"], branch_id=ctx["branch_id"], type=dtype, road_id=road,
                                     severity=severity, duration_min=int(minutes))
             st.rerun()
 
 
-def issue_card(ctx, issue, compact=False):
-    """compact=True: no inner expanders/maps (used inside expanders)."""
-    problem, plan = issue["problem"] or {}, issue.get("plan") or {}
-    who = ctx["partner_names"].get(issue["partner_id"], "Operations desk")
-    if issue["partner_id"] in ctx["partner_names"]:
-        who = f"{who} ({issue['partner_id']})"
-    with st.container(border=True):
-        title = f"#{issue['issue_id']} · {issues.type_label(problem.get('type'))}"
-        if problem.get("road_name"):
-            title += f" · {problem['road_name']}"
-        st.markdown(f"**{escape(title)}** &nbsp; {ui.severity_badge(problem.get('severity', 'medium'))} "
-                    f"{ui.issue_badge(issue['status'])}", unsafe_allow_html=True)
-        st.caption(f"Reported by {who} at {issue['created_at']} · "
-                   f"{'voice note' if issue.get('audio') else 'typed' if issue.get('transcript') else 'quick button'}"
-                   f"{' via ' + issue['transcript_engine'] if issue.get('audio') and issue.get('transcript_engine') else ''}")
-
-        said, plan_col = st.columns([1, 1.5], gap="medium")
-        with said:
-            st.markdown("**What was reported**")
-            if issue.get("audio"):
-                st.audio(issue["audio"], format="audio/wav")
-            if issue.get("transcript"):
-                st.markdown(f'<div class="rp-quote">“{escape(issue["transcript"])}”</div>', unsafe_allow_html=True)
-            st.markdown("**AI understood**")
-            place = problem.get("place") if problem.get("place") != problem.get("road_name") else None
-            minutes = int(problem.get("duration_min") or 0)
-            st.markdown(ui.kv([
-                ("Problem", escape(issues.type_label(problem.get("type")))),
-                ("Where", escape(problem.get("road_name") or "not sure")
-                 + (f"<br><small>near {escape(place)}</small>" if place else "")),
-                ("How long", f"{minutes} min" if minutes else "—"),
-                ("Confidence", f"{int(100 * float(problem.get('confidence', 0)))}%"),
-            ]), unsafe_allow_html=True)
-            if issue["status"] in store.OPEN_ISSUE_STATUSES:
-                with st.popover("Correct it", icon=":material/edit:", width="stretch"):
-                    correct_issue(ctx, issue)
-
-        with plan_col:
-            if plan.get("kind") == "needs_location":
-                st.warning("The report doesn't say where. Use **Correct it** to pick the road; the plan appears "
-                           "right away.", icon=":material/location_off:")
-            elif plan:
-                st.markdown(f"**Impact** · {plan.get('headline', '')}")
-                ba = plan.get("before_after") or {}
-                if ba:
-                    ui.before_after([("Missed deadlines", ba["misses_before"], ba["misses_after"]),
-                                     ("Delay (min)", ba["delay_before"], ba["delay_after"])])
-                if plan.get("actions"):
-                    st.markdown("".join(ui.rec_card(a) for a in plan["actions"][:5]), unsafe_allow_html=True)
-                if issue["status"] == "analysed":
-                    accept_col, reject_col = st.columns([2, 1])
-                    if accept_col.button("Accept plan", type="primary", key=f"accept_{issue['issue_id']}",
-                                         icon=":material/check_circle:", width="stretch"):
-                        st.toast(operations.accept(issue["issue_id"], decided_by=st.session_state.get(
-                            "display_name", "Branch admin"), branch_id=ctx["branch_id"]), icon=":material/check_circle:")
-                        st.rerun()
-                    with reject_col.popover("Reject", width="stretch"):
-                        reason = st.text_input("Why?", key=f"why_{issue['issue_id']}",
-                                               placeholder="e.g. Road already clear")
-                        if st.button("Reject issue", key=f"reject_{issue['issue_id']}", width="stretch"):
-                            operations.reject(issue["issue_id"], reason or "Not needed",
-                                              st.session_state.get("display_name", "Branch admin"),
-                                              branch_id=ctx["branch_id"])
-                            st.rerun()
-                elif issue.get("decision_note"):
-                    st.caption(f"{issue['decision_note']} at {issue.get('decided_at', '')}")
-
-        if plan.get("risk") and not compact:
-            with st.expander("Deliveries at risk, map and how the delay spreads"):
-                risk = pd.DataFrame(plan["risk"])
-                show = risk[["risk_label", "delivery_id", "customer", "priority", "vehicle_id", "planned_eta",
-                             "new_eta", "deadline", "slack_min", "reason"]]
-                st.dataframe(show.rename(columns={"risk_label": "Risk", "delivery_id": "ID", "customer": "Customer",
-                                                  "priority": "Priority", "vehicle_id": "Vehicle",
-                                                  "planned_eta": "Planned", "new_eta": "New ETA", "deadline": "Due",
-                                                  "slack_min": "Slack (min)", "reason": "Why"})
-                             .style.map(lambda v: f"color: {ui.RISK_HEX.get(v, 'inherit')}; font-weight: 600",
-                                        subset=["Risk"]),
-                             hide_index=True, width="stretch")
-                small_map = live_map.build(ctx["partners"], store.deliveries_df(branch_id=ctx["branch_id"]),
-                                           ctx["roads"], [plan["disruption"]],
-                                           plan.get("via_roads", []),
-                                           dict(zip(risk["delivery_id"], risk["risk_label"])), dark=ui.is_dark())
-                st_folium(small_map, height=360, use_container_width=True, key=f"issue_map_{issue['issue_id']}",
-                          returned_objects=[])
-                st.plotly_chart(render_graph(build_graph(plan["disruption"], risk, store.snapshot(ctx["branch_id"]))),
-                                width="stretch")
-        if plan.get("actions") and not compact:
-            with st.expander("Messages that will be sent" if issue["status"] == "analysed" else "Messages sent"):
-                for action in plan["actions"]:
-                    for message in action.get("messages", []):
-                        st.markdown(f"**To {message['to']}**")
-                        st.code(message["text"], language=None, wrap_lines=True)
+def before_after_rows(plan):
+    """Before -> After numbers for the success strip."""
+    ba = plan.get("before_after") or {}
+    hit = max((plan.get("summary") or {}).get("affected_deliveries", 0), 1)
+    if not ba:
+        return []
+    return [("Missed deadlines", ba["misses_before"], ba["misses_after"]),
+            ("Avg delay", f"+{round(ba['delay_before'] / hit)} min", f"+{round(ba['delay_after'] / hit)} min"),
+            ("Critical at risk", ba.get("critical_before", 0), ba.get("critical_after", 0))]
 
 
+def applied_card(issue):
+    """Green 'Plan applied.' card + Before -> After strip."""
+    plan = issue.get("plan") or {}
+    st.markdown(f'<div class="dp-success">{ui.icon("check_circle")} Plan applied.'
+                f'<span class="dp-small" style="font-weight:500;margin-left:auto">#{issue["issue_id"]} · '
+                f'{escape(issue.get("decided_at") or "")}</span></div>', unsafe_allow_html=True)
+    rows = before_after_rows(plan)
+    if rows:
+        ui.before_after(rows)
+
+
+def alert_steps(ctx, issue):
+    """One alert in 3 steps: What changed · What's affected · What to do."""
+    problem, plan = issue.get("problem") or {}, issue.get("plan") or {}
+    who = ctx["partner_names"].get(issue["partner_id"])
+    open_now = issue["status"] in store.OPEN_ISSUE_STATUSES
+
+    ui.step(1, "What changed")
+    said, understood = st.columns([1, 1.2], gap="medium")
+    with said, ui.card(f"said_{issue['issue_id']}"):
+        st.markdown(f"<p class='dp-h3'>{escape(who or 'Ops desk')} · {escape(issue['partner_id'])}</p>"
+                    f"<p class='dp-small'>{escape(issue['created_at'])} · "
+                    f"{'voice' if issue.get('audio') else 'typed' if issue.get('transcript') else 'quick tap'}</p>",
+                    unsafe_allow_html=True)
+        if issue.get("audio"):
+            st.audio(issue["audio"], format="audio/wav")
+        if issue.get("transcript"):
+            st.markdown(f'<div class="dp-quote">“{escape(issue["transcript"])}”</div>', unsafe_allow_html=True)
+    with understood, ui.card(f"understood_{issue['issue_id']}"):
+        minutes = int(problem.get("duration_min") or 0)
+        st.markdown(ui.kv([
+            ("Type", escape(issues.type_label(problem.get("type")))),
+            ("Road", escape(short_road(problem.get("road_name")) or "Not sure")),
+            ("Severity", ui.severity_badge(problem.get("severity", "medium"))),
+            ("Duration", f"{minutes // 60} h {minutes % 60} min".replace(" 0 min", "") if minutes >= 60
+             else f"{minutes} min" if minutes else "—"),
+            ("Confidence", f"{int(100 * float(problem.get('confidence', 0)))}%"),
+            ("Status", ui.issue_pill(issue["status"])),
+        ]), unsafe_allow_html=True)
+        if open_now:
+            with st.popover("Modify", icon=":material/edit:"):
+                modify_form(ctx, issue)
+
+    if plan.get("kind") == "needs_location":
+        ui.step(2, "What's affected")
+        st.warning("No place found. Tap Modify and pick the road.", icon=":material/location_off:")
+        return
+    summary = plan.get("summary") or {}
+    risk = pd.DataFrame(plan.get("risk") or [])
+    ba = plan.get("before_after") or {}
+
+    ui.step(2, "What's affected")
+    if plan.get("kind") == "ripple" and len(risk):
+        ui.kpi_cards([
+            ("package_2", int(summary.get("affected_deliveries", 0)), "Deliveries hit", None, "delayed"),
+            ("local_shipping", len(summary.get("affected_vehicles", [])), "Vehicles", None, "navy"),
+            ("emergency", int((risk["risk_label"] == "Critical").sum()), "Critical", None, "critical"),
+            ("timer", int(ba.get("misses_before", 0)), "Will be late", "without a plan", "critical"),
+        ])
+        graph_col, map_col = st.columns([1.15, 1], gap="medium")
+        with graph_col, ui.card(f"ripple_{issue['issue_id']}"):
+            st.markdown("<p class='dp-h3'>Ripple Impact</p>", unsafe_allow_html=True)
+            st.plotly_chart(render_graph(build_graph(plan["disruption"], risk, store.snapshot(ctx["branch_id"]))),
+                            width="stretch", config={"displayModeBar": False}, key=f"graph_{issue['issue_id']}")
+        with map_col, ui.card(f"minimap_{issue['issue_id']}"):
+            small = live_map.build(ctx["partners"], store.deliveries_df(branch_id=ctx["branch_id"]), ctx["roads"],
+                                   [plan["disruption"]], plan.get("via_roads", []),
+                                   dict(zip(risk["delivery_id"], risk["risk_label"])), states=ctx["states"],
+                                   focus=True, dark=ui.is_dark())
+            st_folium(small, height=380, use_container_width=True, key=f"issue_map_{issue['issue_id']}",
+                      returned_objects=[])
+        with st.expander(f"Deliveries at risk ({len(risk)})", icon=":material/list:"):
+            show = risk.assign(Status=risk["risk_label"].map(lambda r: ui.status_text(ui.risk_state(r))))
+            st.dataframe(show[["Status", "delivery_id", "customer", "priority", "vehicle_id", "planned_eta", "new_eta",
+                               "deadline"]].rename(columns={"delivery_id": "ID", "customer": "Customer",
+                                                            "priority": "Priority", "vehicle_id": "Vehicle",
+                                                            "planned_eta": "Planned", "new_eta": "New ETA",
+                                                            "deadline": "Due"}),
+                         hide_index=True, width="stretch")
+    else:
+        st.markdown(f"<p class='dp-sub'>{escape(plan.get('headline', ''))}</p>", unsafe_allow_html=True)
+
+    ui.step(3, "What to do")
+    actions = plan.get("actions") or []
+    if not actions:
+        ui.empty_state("task_alt", "No action needed.")
+    else:
+        if plan.get("headline"):
+            st.markdown(f"<p class='dp-sub' style='margin-bottom:8px'>{escape(plan['headline'])}</p>",
+                        unsafe_allow_html=True)
+        cols = st.columns(2, gap="small")
+        for i, action in enumerate(actions[:6]):
+            cols[i % 2].markdown(ui.rec_card(action), unsafe_allow_html=True)
+        if len(actions) > 6:
+            with st.expander(f"All {len(actions)} actions"):
+                st.markdown("".join(ui.rec_card(a) for a in actions[6:]), unsafe_allow_html=True)
+        with st.expander("Messages to send", icon=":material/sms:"):
+            for action in actions:
+                for message in action.get("messages", []):
+                    st.markdown(f"**To {escape(message['to'])}**")
+                    st.code(message["text"], language=None, wrap_lines=True)
+    if issue["status"] == "analysed":
+        with st.container(horizontal=True, gap="small"):
+            if st.button("Accept plan", type="primary", key=f"accept_{issue['issue_id']}", icon=":material/check_circle:"):
+                operations.accept(issue["issue_id"], decided_by=st.session_state.get("display_name", "Branch admin"),
+                                  branch_id=ctx["branch_id"])
+                st.session_state["last_applied"] = issue["issue_id"]
+                st.toast("Plan applied.", icon=":material/check_circle:")
+                st.rerun()
+            with st.popover("Modify", icon=":material/edit:"):
+                modify_form(ctx, issue, where="actions")
+            with st.popover("Reject", icon=":material/close:"):
+                reason = st.text_input("Reason", key=f"why_{issue['issue_id']}", placeholder="Road clear")
+                if st.button("Reject alert", key=f"reject_{issue['issue_id']}", width="stretch"):
+                    operations.reject(issue["issue_id"], reason or "Not needed",
+                                      st.session_state.get("display_name", "Branch admin"), branch_id=ctx["branch_id"])
+                    st.toast("Alert rejected.")
+                    st.rerun()
+
+
+# ---------------------------------------------------------------- history
 def activity_feed(ctx, limit=60):
-    icons = {"issue": ":material/report:", "ai": ":material/psychology:", "decision": ":material/gavel:",
-             "delivery": ":material/package_2:", "edit": ":material/edit:", "system": ":material/settings:"}
-    for event in store.events(limit, branch_id=ctx["branch_id"]).to_dict("records"):
-        st.markdown(f"{icons.get(event['kind'], ':material/info:')} `{event['created_at']}` {event['text']}")
+    icons = {"issue": "report", "ai": "psychology", "decision": "gavel", "delivery": "package_2", "edit": "edit",
+             "system": "settings"}
+    rows = [f"<div class='dp-row'><span class='dp-ico' style='color:var(--dp-muted)'>{icons.get(e['kind'], 'info')}"
+            f"</span><div class='main'>{escape(e['text'])}</div><div class='end dp-small'>{escape(e['created_at'])}</div>"
+            f"</div>" for e in store.events(limit, branch_id=ctx["branch_id"]).to_dict("records")]
+    st.markdown("".join(rows) or "<p class='dp-sub'>No activity yet.</p>", unsafe_allow_html=True)

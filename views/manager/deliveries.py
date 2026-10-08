@@ -1,40 +1,72 @@
-"""Deliveries: every order, its delivery partner, ETA, risk and what changed – plus customer messages."""
+"""Deliveries: every order of the branch – filter, select a row for details; SMS sent to customers."""
+from html import escape
+
+import pandas as pd
 import streamlit as st
 
 from modules import guards, manager_ui as mui, store, ui
 
 guards.require_role("branch_admin")
-ui.header("Deliveries", "All of today's orders and the messages sent to customers.")
-ui.live_updates()
+ui.header("Deliveries")
 ctx = mui.context()
 
 deliveries = store.deliveries_df(branch_id=ctx["branch_id"])
-deliveries["risk"] = deliveries["delivery_id"].map(mui.risk_labels_now(ctx["open_issues"])).fillna("")
-partners = ctx["partners"]
-deliveries["driver"] = deliveries["vehicle_id"].map(dict(zip(partners["vehicle_id"], partners["name"])))
-f1, f2 = st.columns([2, 3], vertical_alignment="bottom")
-query = f1.text_input("Search deliveries", placeholder="Customer, area or ID", label_visibility="collapsed")
-status_filter = f2.pills("Delivery status", ["pending", "delivered"], selection_mode="multi",
-                         format_func=str.capitalize, label_visibility="collapsed")
+risk = mui.risk_labels_now(ctx["open_issues"])
+partner_of = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
+state = deliveries.apply(lambda d: "done" if d["status"] == "delivered"
+                         else ui.risk_state(risk.get(d["delivery_id"], "Low")), axis=1)
+deliveries = deliveries.assign(state=state, partner=deliveries["vehicle_id"].map(partner_of).fillna("—"))
+
+with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+    query = st.text_input("Search", placeholder="Customer, area, ID", label_visibility="collapsed",
+                          icon=":material/search:", width=240)
+    state_pick = st.pills("Status", ["normal", "delayed", "critical", "done"], selection_mode="multi",
+                          format_func=ui.status_text, label_visibility="collapsed", key="del_state")
+    priority_pick = st.pills("Priority", ["medical", "perishable", "express", "standard"], selection_mode="multi",
+                             format_func=str.capitalize, label_visibility="collapsed", key="del_priority")
+    partner_pick = st.selectbox("Partner", [None] + sorted(set(partner_of.values())), key="del_partner", width=180,
+                                format_func=lambda p: "All partners" if p is None else f"{p} · {ctx['partner_names'][p]}",
+                                label_visibility="collapsed")
 view = deliveries
 if query:
     hay = (view["customer"] + " " + view["address_area"] + " " + view["delivery_id"]).str.lower()
     view = view[hay.str.contains(query.lower(), regex=False)]
-if status_filter:
-    view = view[view["status"].isin(status_filter)]
-columns = {"delivery_id": "ID", "customer": "Customer", "address_area": "Area", "priority": "Priority",
-           "driver": "Delivery Partner", "vehicle_id": "Vehicle", "stop_order": "Stop", "planned_eta": "ETA",
-           "deadline": "Due", "status": "Status", "risk": "Risk", "note": "Change", "customer_phone": "Phone"}
-st.dataframe(view[list(columns)].rename(columns=columns)
-             .style.map(lambda v: f"color: {ui.RISK_HEX.get(v, 'inherit')}; font-weight: 600", subset=["Risk"]),
-             hide_index=True, width="stretch", height=460)
-st.download_button("Download deliveries (CSV)", view[list(columns)].rename(columns=columns).to_csv(index=False),
-                   "ripple-deliveries.csv", "text/csv", icon=":material/download:")
+if state_pick:
+    view = view[view["state"].isin(state_pick)]
+if priority_pick:
+    view = view[view["priority"].isin(priority_pick)]
+if partner_pick:
+    view = view[view["partner"] == partner_pick]
+
+table = pd.DataFrame({"ID": view["delivery_id"], "Customer": view["customer"], "Area": view["address_area"],
+                      "Priority": view["priority"].str.capitalize(), "Partner": view["partner"],
+                      "ETA": view["planned_eta"], "Due": view["deadline"], "Status": view["state"].map(ui.status_text),
+                      "Change": view["note"].fillna("").str.capitalize()})
+table_col, panel_col = st.columns([2.2, 1], gap="medium")
+with table_col:
+    event = st.dataframe(table, hide_index=True, width="stretch", height=480, on_select="rerun",
+                         selection_mode="single-row", key="deliveries_table")
+    st.download_button("Download CSV", table.to_csv(index=False), "deport-deliveries.csv", "text/csv",
+                       icon=":material/download:")
+with panel_col, ui.card("delivery_panel"):
+    rows = event.selection.rows if event else []
+    if not rows:
+        ui.empty_state("touch_app", "Select a delivery.")
+    else:
+        d = view.iloc[rows[0]]
+        st.markdown(f"<p class='dp-h3'>{escape(d['customer'])}</p><p class='dp-small'>{escape(d['delivery_id'])} · "
+                    f"{escape(d['address_area'])}</p><div style='margin:8px 0'>{ui.pill_html(d['state'])}</div>",
+                    unsafe_allow_html=True)
+        st.markdown(ui.kv([("Priority", escape(d["priority"].capitalize())), ("Partner", escape(d["partner"])),
+                           ("Vehicle", escape(d["vehicle_id"])), ("Stop", int(d["stop_order"])),
+                           ("ETA", escape(d["planned_eta"])), ("Due", escape(d["deadline"])),
+                           ("Change", escape(str(d["note"] or "—").capitalize()))]), unsafe_allow_html=True)
+        st.link_button("Call customer", f"tel:{d['customer_phone']}", icon=":material/call:", width="stretch")
 
 sms = store.customer_messages(branch_id=ctx["branch_id"])
-st.markdown(f"##### Customer messages ({len(sms)})")
-if len(sms):
-    st.dataframe(sms.rename(columns={"created_at": "Time", "issue_id": "Issue", "to_customer": "Customer",
-                                     "to_phone": "Phone", "text": "Message"}), hide_index=True, width="stretch")
-else:
-    st.caption("Messages to customers appear here when a plan is accepted.")
+with st.expander(f"SMS sent ({len(sms)})", icon=":material/sms:"):
+    if len(sms):
+        st.dataframe(sms.rename(columns={"created_at": "Time", "issue_id": "Alert", "to_customer": "Customer",
+                                         "to_phone": "Phone", "text": "Message"}), hide_index=True, width="stretch")
+    else:
+        st.caption("Sent when a plan is applied.")

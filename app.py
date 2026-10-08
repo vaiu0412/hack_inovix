@@ -62,6 +62,7 @@ else:
 
 navigation = st.navigation(pages)
 ui.sidebar_user()
+ui.live_updates()  # one refresh watcher for every page, at a fixed place in the sidebar
 if "_welcome" in st.session_state:
     st.toast(st.session_state.pop("_welcome"))
 navigation.run()

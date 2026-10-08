@@ -1,22 +1,31 @@
-"""History: decided issues and the full activity log."""
+"""History: every decided alert (with its before -> after) and the day's activity."""
+from html import escape
+
 import streamlit as st
 
 from modules import guards, manager_ui as mui, store, ui
 
 guards.require_role("branch_admin")
-ui.header("History", "Every decision and event since the start of the day.")
-ui.live_updates()
+ui.header("History")
 ctx = mui.context()
 
 closed = store.list_issues(("accepted", "rejected"), branch_id=ctx["branch_id"])
-st.markdown(f"##### Decided issues ({len(closed)})")
+ui.section(f"Decided alerts ({len(closed)})", "gavel")
 if not closed:
-    st.caption("Accepted and rejected issues appear here.")
+    with ui.card("no_history"):
+        ui.empty_state("history", "No decisions yet.")
 for issue in closed[:20]:
-    with st.expander(f"#{issue['issue_id']} · {issue['summary']} · {ui.ISSUE_STATUS[issue['status']][0]}"):
-        mui.issue_card(ctx, issue, compact=True)
+    word = ui.ISSUE_STATUS[issue["status"]][0]
+    with st.expander(f"#{issue['issue_id']} · {mui.alert_line(ctx, issue)} · {word}"):
+        if issue["status"] == "accepted":
+            mui.applied_card(issue)
+            st.markdown("".join(ui.rec_card(a) for a in (issue.get("plan") or {}).get("actions", [])[:4]),
+                        unsafe_allow_html=True)
+        else:
+            st.markdown(f"<p class='dp-sub'>Rejected at {escape(issue.get('decided_at') or '')}: "
+                        f"{escape(issue.get('decision_note') or '')}</p>", unsafe_allow_html=True)
 
-st.markdown("##### Activity log")
-with st.container(border=True):
+ui.section("Activity", "history")
+with ui.card("activity"):
     mui.activity_feed(ctx, limit=80)
 mui.ai_status_line()

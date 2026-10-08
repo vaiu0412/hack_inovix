@@ -1,4 +1,4 @@
-"""Report Issue: voice note, quick button or text -> operations gets the problem and an AI plan."""
+"""Report: tap what happened, record or type, check, send."""
 from html import escape
 
 import streamlit as st
@@ -9,20 +9,19 @@ from modules.report_ui import report_form
 guards.require_role("partner")
 dp_id = guards.dp_id()
 branch = guards.branch_id()  # from the validated session only
-ui.header("Report an issue", "Say it in Tamil, English or both – we'll work out the rest.")
-ui.live_updates()
-
-with st.container(border=True):
-    issue_id = report_form(dp_id, branch, prefix=f"partner_{dp_id}", source="partner")
-if issue_id:
-    st.session_state["last_sent_issue"] = issue_id
-    st.toast("Sent to operations", icon=":material/send:")
-    st.rerun()
+ui.header("Report", "Say it in Tamil or English.")
 
 reports = scope.get_partner_incidents(dp_id, branch)
 if reports and st.session_state.get("last_sent_issue") == reports[0]["issue_id"]:
     latest = reports[0]
-    with st.container(border=True):
-        st.markdown(f":material/check_circle: **Sent** · {escape(latest['summary'] or '')} &nbsp;"
-                    f"{ui.issue_badge(latest['status'])}", unsafe_allow_html=True)
-        st.caption("Operations is reviewing it with an AI plan. New instructions will appear on Today.")
+    st.markdown(f'<div class="dp-success">{ui.icon("check_circle")} Issue sent to admin.'
+                f'<span style="margin-left:auto">{ui.issue_pill(latest["status"])}</span></div>'
+                f'<p class="dp-sub" style="margin:-4px 0 12px">{escape(latest["summary"] or "")}</p>',
+                unsafe_allow_html=True)
+
+with ui.card("report"):
+    issue_id = report_form(dp_id, branch, prefix=f"partner_{dp_id}", source="partner")
+if issue_id:
+    st.session_state["last_sent_issue"] = issue_id
+    st.toast("Issue sent to admin.", icon=":material/send:")
+    st.rerun()

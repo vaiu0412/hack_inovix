@@ -13,7 +13,6 @@ dp_id = guards.dp_id()
 branch = guards.branch_id()  # from the validated session only
 profile = scope.get_partner_profile(dp_id, branch)
 ui.header("Route", f"{profile['pending']} stops left")
-ui.live_updates()
 
 deliveries = scope.get_partner_deliveries(dp_id, branch)
 route = scope.get_partner_route(dp_id, branch)

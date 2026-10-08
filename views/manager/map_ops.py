@@ -5,7 +5,6 @@ from modules import guards, manager_ui as mui, ui
 
 guards.require_role("branch_admin")
 ui.header("Live Map", "Tap a vehicle for details.")
-ui.live_updates()
 ctx = mui.context()
 mui.alert_banner(ctx)
 

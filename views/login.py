@@ -81,7 +81,7 @@ st.markdown(f"""<style>
   animation: rp-wave 6s ease-out infinite; opacity: 0; }}
 .rp-ripple span:nth-child(2) {{ animation-delay: 2s; }} .rp-ripple span:nth-child(3) {{ animation-delay: 4s; }}
 @keyframes rp-wave {{ 0% {{ transform: scale(.25); opacity: .55; }} 100% {{ transform: scale(1.15); opacity: 0; }} }}
-.rp-brand > * {{ position: relative; }}
+.rp-brand > :not(.rp-routes):not(.rp-ripple) {{ position: relative; }}
 .rp-mark {{ display: flex; align-items: center; gap: 12px; font-weight: 800; letter-spacing: .18em; font-size: 1.15rem; }}
 .rp-hero h1 {{ color: #fff; font-size: 2.5rem; line-height: 1.12; font-weight: 750; letter-spacing: -.02em;
   margin: 0 0 14px; padding: 0; max-width: 520px; }}
@@ -95,8 +95,8 @@ st.markdown(f"""<style>
   width: 100%; margin: 0 auto; padding: 34px 32px 26px; box-shadow: 0 24px 48px rgba(15,23,42,.10),
   0 2px 6px rgba(15,23,42,.06); animation: rp-in .3s ease-out both; }}
 @keyframes rp-in {{ from {{ opacity: 0; transform: translateY(14px); }} to {{ opacity: 1; transform: none; }} }}
-.rp-title {{ font-size: 1.7rem; font-weight: 750; letter-spacing: -.01em; margin: 0; line-height: 1.2; }}
-.rp-sub {{ color: {muted}; margin: 6px 0 18px; }}
+.st-key-login_card p.rp-title {{ font-size: 1.7rem; font-weight: 750; letter-spacing: -.01em; margin: 0; line-height: 1.2; }}
+.st-key-login_card p.rp-sub {{ color: {muted}; margin: 6px 0 18px; }}
 .st-key-login_card button {{ min-height: 48px; font-weight: 600; border-radius: 12px; }}
 .st-key-login_card input {{ min-height: 46px; }}
 .st-key-login_card button:focus-visible, .st-key-login_card input:focus-visible {{ outline: 3px solid #93C5FD; }}
@@ -113,6 +113,11 @@ st.markdown(f"""<style>
 .rp-super-head small {{ display: block; font-weight: 400; color: #94A3B8; }}
 .rp-demo {{ font-size: .78rem; font-weight: 700; color: #B45309; background: #FEF3C7; border-radius: 999px;
   padding: 2px 10px; display: inline-block; margin-bottom: 8px; }}
+/* columns inside the card (Remember me | Forgot password) keep their natural height and stay side by side */
+.st-key-login_page .st-key-login_card [data-testid="stHorizontalBlock"] {{ min-height: auto; flex-direction: row;
+  flex-wrap: nowrap; align-items: center; gap: .5rem; }}
+.st-key-login_page .st-key-login_card [data-testid="stColumn"] {{ width: auto !important; min-width: 0;
+  flex: 1 1 0 !important; }}
 @media (max-width: 768px) {{
   .st-key-login_page [data-testid="stHorizontalBlock"] {{ flex-direction: column; min-height: auto; gap: .75rem; }}
   .st-key-login_page [data-testid="stColumn"] {{ width: 100% !important; flex: 1 1 100% !important; }}

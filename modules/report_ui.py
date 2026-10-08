@@ -15,17 +15,17 @@ from modules.data_loader import load_all
 from modules.voice import available_engines
 
 
-def _backend(reporter_id, source):
-    """(preview, submit, road options) for this kind of reporter."""
+def _backend(reporter_id, source, branch_id):
+    """(preview, submit, road options) for this kind of reporter, always inside one branch."""
     if source == "partner":
         from modules import partner_scope as scope
 
-        return (lambda **kw: scope.preview_issue(reporter_id, **kw),
-                lambda problem, **kw: scope.report_issue(reporter_id, problem, **kw),
-                lambda: scope.route_road_options(reporter_id))
+        return (lambda **kw: scope.preview_issue(reporter_id, branch_id, **kw),
+                lambda problem, **kw: scope.report_issue(reporter_id, branch_id, problem, **kw),
+                lambda: scope.route_road_options(reporter_id, branch_id))
     roads = load_all()["roads"]
-    return (lambda **kw: issues.preview(reporter_id, **kw),
-            lambda problem, **kw: issues.submit(reporter_id, problem, source="manager", **kw),
+    return (lambda **kw: issues.preview(reporter_id, branch_id=branch_id, **kw),
+            lambda problem, **kw: issues.submit(reporter_id, problem, source="manager", branch_id=branch_id, **kw),
             lambda: list(zip(roads["road_id"], roads["name"])))
 
 
@@ -40,9 +40,9 @@ def _clear(prefix):
     ui.resume_live_updates()
 
 
-def report_form(partner_id, prefix="report", source="partner"):
+def report_form(partner_id, branch_id, prefix="report", source="partner"):
     """Draw the form. Returns the new issue id right after sending, else None."""
-    preview_fn, submit_fn, road_options_fn = _backend(partner_id, source)
+    preview_fn, submit_fn, road_options_fn = _backend(partner_id, source, branch_id)
     quick = st.pills("What happened?", list(issues.QUICK_TYPES), format_func=issues.QUICK_TYPES.get,
                      key=_key(prefix, "quick"))
     audio = st.audio_input("Voice note (Tamil, English or both)", key=_key(prefix, "audio"))

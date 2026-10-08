@@ -1,7 +1,7 @@
-partner_id,name,phone,vehicle_id,shift_start,shift_end,languages,rating,status
-DP101,Murugan,+91 90000 20001,V1,08:00,17:00,Tamil|English,4.7,on_duty
-DP102,Karthik,+91 90000 20002,V2,08:30,17:30,Tamil|English,4.5,on_duty
-DP103,Selvam,+91 90000 20003,V3,07:30,16:30,Tamil,4.6,on_duty
-DP104,Priya,+91 90000 20004,V4,09:00,18:00,Tamil|English|Malayalam,4.8,on_duty
-DP105,Arun,+91 90000 20005,V5,08:00,17:00,Tamil|English,4.4,on_duty
-DP106,Lakshmi,+91 90000 20006,V6,08:00,17:00,Tamil|English,4.9,standby
+partner_id,name,phone,vehicle_id,shift_start,shift_end,languages,rating,status,branch_id
+DP101,Murugan,+91 90000 20001,V1,08:00,17:00,Tamil|English,4.7,on_duty,CBE-E
+DP102,Karthik,+91 90000 20002,V2,08:30,17:30,Tamil|English,4.5,on_duty,CBE-E
+DP103,Selvam,+91 90000 20003,V3,07:30,16:30,Tamil,4.6,on_duty,CBE-E
+DP104,Priya,+91 90000 20004,V4,09:00,18:00,Tamil|English|Malayalam,4.8,on_duty,CBE-C
+DP105,Arun,+91 90000 20005,V5,08:00,17:00,Tamil|English,4.4,on_duty,CBE-S
+DP106,Lakshmi,+91 90000 20006,V6,08:00,17:00,Tamil|English,4.9,standby,CBE-E

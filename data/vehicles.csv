@@ -1,7 +1,10 @@
-vehicle_id,reg_no,driver,type,status,current_lat,current_lng,route_roads,capacity
-V1,TN-37-AB-1234,Murugan,van,active,11.0080,76.9480,R6|R7|R1,40
-V2,TN-37-CK-4521,Karthik,bike,active,10.9895,76.9612,R10|R8|R1|R9,10
-V3,TN-37-DM-7788,Selvam,truck,active,10.9962,76.9690,R2|R1|R9,120
-V4,TN-37-EF-3310,Priya,van,active,11.0172,76.9618,R3|R4,40
-V5,TN-37-GH-9902,Arun,bike,active,10.9965,76.9603,R10|R5|R2,10
-V6,TN-37-BK-0606,Lakshmi,van,backup,11.0290,77.0085,,40
+vehicle_id,reg_no,driver,type,status,current_lat,current_lng,route_roads,capacity,branch_id
+V1,TN-37-AB-1234,Murugan,van,active,11.008,76.948,R6|R7|R1,40,CBE-E
+V2,TN-37-CK-4521,Karthik,bike,active,10.9895,76.9612,R10|R8|R1|R9,10,CBE-E
+V3,TN-37-DM-7788,Selvam,truck,active,10.9962,76.969,R2|R1|R9,120,CBE-E
+V4,TN-37-EF-3310,Priya,van,active,11.0172,76.9618,R3|R4,40,CBE-C
+V5,TN-37-GH-9902,Arun,bike,active,10.9965,76.9603,R10|R5|R2,10,CBE-S
+V6,TN-37-BK-0606,Lakshmi,van,backup,11.029,77.0085,,40,CBE-E
+V7,TN-37-HJ-4410,,van,spare,11.0185,76.9645,,40,CBE-C
+V8,TN-37-KL-2290,,bike,spare,10.9905,76.9612,,10,CBE-S
+V9,TN-37-MN-7315,,bike,spare,11.025,77.007,,10,CBE-E

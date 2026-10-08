@@ -129,7 +129,8 @@ def match_vehicle(text, vehicles):
     if vid and f"V{int(vid.group(1))}" in set(vehicles["vehicle_id"]):
         return f"V{int(vid.group(1))}"
     for _, v in vehicles.iterrows():
-        if _contains(text.lower(), v["driver"].lower()):
+        driver = v.get("driver")
+        if isinstance(driver, str) and driver and _contains(text.lower(), driver.lower()):  # spare vehicles: no driver
             return v["vehicle_id"]
     return None
 

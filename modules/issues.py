@@ -93,10 +93,14 @@ def set_location(problem, road_id, data):
     return problem
 
 
-def preview(partner_id, text="", audio=None, quick_type=None):
-    """What we understood (nothing is saved). Returns transcript, engine and problem."""
+def preview(partner_id, text="", audio=None, quick_type=None, branch_id=None):
+    """What we understood (nothing is saved). Returns transcript, engine and problem.
+
+    Only the reporter's own branch is considered (the partner's branch, or the given branch for
+    issues the branch admin logs for the operations desk).
+    """
     partner = reporter(partner_id)
-    data = store.snapshot()
+    data = store.snapshot(partner.get("branch_id") or branch_id)
     transcript, engine = (text or "").strip(), "typed"
     if audio and not transcript:
         heard = transcribe(audio)
@@ -108,15 +112,20 @@ def preview(partner_id, text="", audio=None, quick_type=None):
     return {"transcript": transcript, "engine": engine, "problem": problem}
 
 
-def submit(partner_id, problem, transcript="", engine="typed", audio=None, quick_type=None, source="partner"):
-    """Save the issue, log it, and let the AI prepare a plan for the manager. Returns the issue id."""
+def submit(partner_id, problem, transcript="", engine="typed", audio=None, quick_type=None, source="partner",
+           branch_id=None):
+    """Save the issue in the reporter's branch, log it, and let the AI prepare a plan. Returns the issue id."""
     from modules import operations  # avoid a circular import
 
-    issue_id = store.add_issue(partner_id, text=transcript, audio=audio, quick_type=quick_type, source=source)
+    branch = reporter(partner_id).get("branch_id") or branch_id
+    if not branch:
+        raise ValueError("An issue must belong to a branch")
+    issue_id = store.add_issue(partner_id, text=transcript, audio=audio, quick_type=quick_type, source=source,
+                               branch_id=branch)
     store.update_issue(issue_id, transcript=transcript, transcript_engine=engine, problem=problem,
                        summary=problem["summary"])
     who = problem.get("reporter_name") or partner_id
-    store.log_event("issue", f"{who} reported: {problem['summary']}", issue_id)
+    store.log_event("issue", f"{who} reported: {problem['summary']}", issue_id, branch_id=branch)
     operations.analyse(issue_id)
     return issue_id
 

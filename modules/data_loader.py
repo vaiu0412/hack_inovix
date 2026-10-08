@@ -98,6 +98,16 @@ def load_partners():
 
 
 @lru_cache(maxsize=1)
+def _read_branches():
+    return pd.read_csv(DATA_DIR / "branches.csv")
+
+
+def load_branches():
+    """The demo branches (Coimbatore East / Central / South)."""
+    return _read_branches().copy()
+
+
+@lru_cache(maxsize=1)
 def _read_places():
     places = pd.read_csv(DATA_DIR / "places.csv")
     places["aliases"] = places["aliases"].apply(lambda s: [a.lower() for a in _split_pipe(s)])
@@ -131,7 +141,8 @@ if __name__ == "__main__":
     print("Road lengths (km):", dict(zip(data["roads"]["road_id"], data["roads"]["length_km"])))
     print("Clock:", now_label())
     partners, places = load_partners(), load_places()
-    assert set(partners["vehicle_id"]) == set(data["vehicles"]["vehicle_id"])
+    assert set(partners["vehicle_id"]) <= set(data["vehicles"]["vehicle_id"])  # spare vehicles have no partner
+    assert set(partners["branch_id"]) == set(load_branches()["branch_id"])
     assert set(places["road_id"]) <= set(data["roads"]["road_id"])
     print(f"partners: {len(partners)} | places: {len(places)} | V1 is near:",
           nearest_place(11.0080, 76.9480))

@@ -8,7 +8,10 @@ Rules (most urgent first):
 - Low                         -> reschedule and notify the customer.
 Every action carries a plain-English "why" and drafted messages.
 """
-from modules.data_loader import NOW_MIN, haversine_km, min_to_hhmm, road_length_km
+import json
+import re
+
+from modules.data_loader import NOW_MIN, haversine_km, min_to_hhmm
 from modules.impact import CASCADE_STEP_MIN
 from modules.parser import call_llm, llm_available
 from modules.risk import score_risk
@@ -68,16 +71,29 @@ def nearest_backup(data, lat, lng):
     return backups.loc[dist.idxmin()]
 
 
-def _polish(text):
-    """Optionally let the LLM smooth the wording. Template text on any error."""
-    if not llm_available():
-        return text
+def _numbers(text):
+    return set(re.findall(r"\d+(?:[.:]\d+)?", text))
+
+
+def polish_whys(whys):
+    """Optionally let the LLM smooth all "why" texts in ONE request.
+
+    Any line where the LLM dropped or changed a number/time keeps the template text.
+    """
+    if not whys or not llm_available():
+        return whys
+    numbered = "\n".join(f"{i + 1}. {w}" for i, w in enumerate(whys))
+    prompt = ("Rewrite each numbered line as one short, plain-English sentence for a delivery dispatcher. "
+              "Keep every number, name, vehicle id and time exactly. "
+              'Return ONLY JSON: {"whys": [one string per line, same order]}\n\n' + numbered)
     try:
-        out = call_llm("Rewrite as one short, plain-English sentence for a dispatcher. "
-                       "Keep every number, name and time exactly. No preamble.\n\n" + text, timeout=6)
-        return out.strip().strip('"') or text
+        out = json.loads(call_llm(prompt, want_json=True)).get("whys", [])
     except Exception:
-        return text
+        return whys
+    if len(out) != len(whys):
+        return whys
+    return [new.strip() if isinstance(new, str) and new.strip() and _numbers(old) <= _numbers(new) else old
+            for old, new in zip(whys, out)]
 
 
 def _customer_sms(row, eta, extra=""):
@@ -272,8 +288,8 @@ def recommend(impact, disruption, data, polish=True):
     after = score_risk(after.drop(columns=["risk_score", "risk_label", "reason", "_cause"]), disruption)
 
     if polish:
-        for action in actions:
-            action["why"] = _polish(action["why"])
+        for action, why in zip(actions, polish_whys([a["why"] for a in actions])):
+            action["why"] = why
 
     before_after = {
         "misses_before": int(impact["will_miss"].sum()),

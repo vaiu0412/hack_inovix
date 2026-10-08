@@ -7,6 +7,7 @@ Supports simple Tanglish ("accident aachu", "mazhai", "late aagum", ...).
 import json
 import os
 import re
+import time
 import urllib.request
 
 SEVERITIES = ["low", "medium", "high", "critical"]
@@ -152,12 +153,31 @@ def parse_rules(text, data):
 
 
 # ---------------------------------------------------------------- optional LLM
+LLM_COOLDOWN_SEC = 300  # after a failure, skip the LLM for 5 minutes
+_llm_paused_until = 0.0
+
+
 def llm_available():
     return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY"))
 
 
-def call_llm(prompt, want_json=False, timeout=10):
-    """Send a prompt to Gemini or Groq. Returns text, raises on any problem."""
+def call_llm(prompt, want_json=False, timeout=8):
+    """Send a prompt to Gemini or Groq. Returns text, raises on any problem.
+
+    One failure (bad key, no network, timeout) pauses the LLM for a while,
+    so the app falls back to rules instantly instead of waiting every time.
+    """
+    global _llm_paused_until
+    if time.time() < _llm_paused_until:
+        raise RuntimeError("LLM paused after a recent failure")
+    try:
+        return _call_provider(prompt, want_json, timeout)
+    except Exception:
+        _llm_paused_until = time.time() + LLM_COOLDOWN_SEC
+        raise
+
+
+def _call_provider(prompt, want_json, timeout):
     if os.getenv("GEMINI_API_KEY"):
         model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"

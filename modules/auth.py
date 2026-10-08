@@ -275,7 +275,7 @@ def user_for_google_email(email):
     with store.connect() as conn:
         row = _find(conn, email)
         if not row or normalize(row["email"]) != normalize(email):
-            return None, "No RIPPLE account uses this Google email. Ask your admin to add it."
+            return None, "No account uses this Google email."
         problem = _status_problem(row, "workspace")
         if problem:
             return None, problem
@@ -301,16 +301,16 @@ if __name__ == "__main__":
 
     os.environ["RIPPLE_DB"] = str(Path(tempfile.mkdtemp()) / "auth.db")
     store.init_db()
-    for ident, pw, portal in [("east.admin@ripple.in", "Admin@123", "workspace"), (" dp102 ", "Partner@123", "workspace"),
-                              ("superadmin@ripple.in", "Super@123", "workspace"),
-                              ("superadmin@ripple.in", "Super@123", "super"), ("dp102", "nope", "workspace")]:
+    for ident, pw, portal in [("east.admin@deport.in", "Admin@123", "workspace"), (" dp102 ", "Partner@123", "workspace"),
+                              ("superadmin@deport.in", "Super@123", "workspace"),
+                              ("superadmin@deport.in", "Super@123", "super"), ("dp102", "nope", "workspace")]:
         user, error = authenticate(ident, pw, portal)
         print(f"{ident:24} {portal:9} ->", (user["role"], user["branch_id"]) if user else error)
     token = create_session("DP102", remember_me=True)
     assert validate_session(token)["dp_id"] == "DP102"
     revoke_session(token)
     assert validate_session(token) is None
-    code, message, ok = request_otp("dp102@ripple.in", "login")
+    code, message, ok = request_otp("dp102@deport.in", "login")
     print("OTP:", message, "| demo code shown:", bool(code))
     assert verify_otp("DP102", code, "login")[0]["user_id"] == "DP102"
     assert verify_otp("DP102", code, "login")[0] is None  # single use

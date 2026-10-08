@@ -1,4 +1,4 @@
-"""RIPPLE – disruption-aware delivery operations for Coimbatore.
+"""DEPORT – Disruption-Aware Logistics Decision Support System (Coimbatore).
 
 Before sign-in only the sign-in page exists. After sign-in the navigation contains ONLY the pages
 of the account's role – Super Admin, Branch Admin or Delivery Partner – and every page re-checks it.

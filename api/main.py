@@ -1,4 +1,4 @@
-"""RIPPLE REST API – the same logic, database and sessions as the Streamlit app, for a native mobile app.
+"""DEPORT REST API – the same logic, database and sessions as the Streamlit app, for a native mobile app.
 
 Run:   uvicorn api.main:app --reload
 Docs:  http://localhost:8000/docs   (click "Authorize" and paste the token from POST /login)
@@ -27,7 +27,7 @@ async def lifespan(_app):
     yield
 
 
-app = FastAPI(title="RIPPLE API", version="4.0", lifespan=lifespan,
+app = FastAPI(title="DEPORT API", version="4.0", lifespan=lifespan,
               description="Disruption-aware delivery operations with 3-level access: Super Admin, Branch Admin, "
                           "Delivery Partner.")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])

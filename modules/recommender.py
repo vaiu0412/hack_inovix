@@ -101,9 +101,15 @@ def polish_whys(whys):
             for old, new in zip(whys, out)]
 
 
+def _spare(slack):
+    """'12 min to spare' / 'late by 25 min' – for the 2-line WHY on screen."""
+    slack = int(slack)
+    return f"{slack} min to spare" if slack >= 0 else f"late by {-slack} min"
+
+
 def _customer_sms(row, eta, extra=""):
     return (f"Hi {row['customer']}, your delivery {row['delivery_id']} is delayed due to "
-            f"{row['_cause']}. {extra}New ETA: {eta}. Sorry for the trouble. – Ripple Logistics")
+            f"{row['_cause']}. {extra}New ETA: {eta}. Sorry for the trouble. – DEPORT Logistics")
 
 
 # ---------------------------------------------------------------- main
@@ -178,7 +184,13 @@ def recommend(impact, disruptions, data, polish=True):
             where = f"after its previous drop, backup {backup.name} is {idle_km:.1f} km from {row['original_vehicle']}"
         why = (f"{row['customer']} ({row['priority']}) {lateness}; {where}, "
                f"so it can collect the parcel from {row['original_vehicle']} and deliver by {eta_txt}.")
+        free = (f"{backup.name} is free, {idle_km:.1f} km away." if len(backup_jobs) == 1
+                else f"{backup.name} goes next, {idle_km:.1f} km away.")
+        short = {"title": f"Move {row['delivery_id']} to {backup.name}",
+                 "why_short": f"{row['priority'].capitalize()} parcel, {_spare(row['slack_min'])}.\n{free}",
+                 "impact_short": f"Arrives {eta_txt} · saves {max(saved, 0)} min"}
         actions.append({
+            **short,
             "action_type": "reassign",
             "target": f"delivery {row['delivery_id']}",
             "description": f"Move {row['delivery_id']} ({row['customer']}) from {row['original_vehicle']} "
@@ -259,7 +271,12 @@ def recommend(impact, disruptions, data, polish=True):
                f"{first['customer']} ({first['priority']}) {lateness}. Going via {via} adds "
                f"~{total_km} km (~{total_min} min) instead of waiting ~{int(first['delay_min'])} min.")
         stops = ", ".join(own.sort_values("stop_order")["delivery_id"])
+        short = {"title": f"Reroute {vid} via {via}",
+                 "why_short": f"{len(own)} stops behind the block.\n"
+                              f"Detour +{total_km} km, not a {int(first['delay_min'])} min wait.",
+                 "impact_short": f"Saves {saved} min"}
         actions.append({
+            **short,
             "action_type": "reroute",
             "target": f"vehicle {vid}",
             "description": f"Reroute {vid} ({vehicle['reg_no']}) around {around}",
@@ -294,6 +311,9 @@ def recommend(impact, disruptions, data, polish=True):
             why = (f"{row['customer']} ({row['priority']}) has {slack} min slack after the delay, so it doesn't "
                    f"need a vehicle swap; serving it first once {row['_wait_for']} keeps the cascade small.")
         actions.append({
+            "title": f"Prioritise {row['delivery_id']}",
+            "why_short": f"{row['priority'].capitalize()}, {_spare(slack)}.\nNo vehicle swap needed.",
+            "impact_short": f"New ETA {min_to_hhmm(new_eta)}",
             "action_type": "resequence",
             "target": f"delivery {row['delivery_id']}",
             "description": f"Prioritise {row['delivery_id']} ({row['customer']}) in {row['vehicle_id']}'s sequence",
@@ -316,6 +336,9 @@ def recommend(impact, disruptions, data, polish=True):
         why = (f"{row['customer']} is low risk ({row['slack_min']} min slack, {row['priority']}); "
                f"a heads-up message is enough, no vehicle change needed.")
         actions.append({
+            "title": f"Notify {row['customer']}",
+            "why_short": f"Low risk, {_spare(row['slack_min'])}.\nA message is enough.",
+            "impact_short": f"New ETA {min_to_hhmm(eta)}",
             "action_type": "reschedule_notify",
             "target": f"delivery {row['delivery_id']}",
             "description": f"Notify {row['customer']} of new ETA {min_to_hhmm(eta)}",

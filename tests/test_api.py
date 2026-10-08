@@ -20,7 +20,7 @@ def token(client, identifier, password, super_console=False):
 
 @pytest.fixture()
 def east(client):
-    return token(client, "east.admin@ripple.in", "Admin@123")
+    return token(client, "east.admin@deport.in", "Admin@123")
 
 
 @pytest.fixture()
@@ -30,12 +30,12 @@ def karthik(client):
 
 def test_login_errors_and_logout(client):
     assert client.get("/health").json()["status"] == "ok"
-    assert client.post("/login", json={"identifier": "east.admin@ripple.in", "password": "x"}).status_code == 401
-    assert client.post("/login", json={"identifier": "superadmin@ripple.in", "password": "Super@123"}).status_code == 403
+    assert client.post("/login", json={"identifier": "east.admin@deport.in", "password": "x"}).status_code == 401
+    assert client.post("/login", json={"identifier": "superadmin@deport.in", "password": "Super@123"}).status_code == 403
     for _ in range(4):
         client.post("/login", json={"identifier": "DP103", "password": "x"})
     assert client.post("/login", json={"identifier": "DP103", "password": "x"}).status_code == 429
-    headers = token(client, "dp101@ripple.in", "Partner@123")
+    headers = token(client, "dp101@deport.in", "Partner@123")
     assert client.get("/me", headers=headers).status_code == 200
     assert client.post("/logout", headers=headers).json()["ok"]
     assert client.get("/me", headers=headers).status_code == 401          # revoked
@@ -44,7 +44,7 @@ def test_login_errors_and_logout(client):
 
 
 def test_super_admin_sees_summaries_only(client):
-    boss = token(client, "superadmin@ripple.in", "Super@123", super_console=True)
+    boss = token(client, "superadmin@deport.in", "Super@123", super_console=True)
     branches = client.get("/branches", headers=boss).json()
     assert {b["branch_id"] for b in branches} == {"CBE-E", "CBE-C", "CBE-S"}
     assert client.get("/partners", headers=boss).status_code == 403          # no day-to-day operations
@@ -75,7 +75,7 @@ def test_report_accept_stays_in_branch(client, east, karthik):
     reply = client.post("/me/issues", json={"text": "avinasi rd accident, full block, 2 hours"}, headers=karthik)
     assert reply.status_code == 201 and reply.json()["status"] == "analysed" and "plan" not in reply.json()
     issue_id = reply.json()["issue_id"]
-    central = token(client, "central.admin@ripple.in", "Admin@123")
+    central = token(client, "central.admin@deport.in", "Admin@123")
     assert client.get(f"/issues/{issue_id}", headers=central).status_code == 404
     assert client.post(f"/issues/{issue_id}/accept", headers=central).status_code == 404
     result = client.post(f"/issues/{issue_id}/accept", headers=east).json()
@@ -97,5 +97,5 @@ def test_needs_location_then_edit_then_reject(client, east):
 
 def test_reset_is_super_admin_only(client, east):
     assert client.post("/demo/reset", headers=east).status_code == 403
-    boss = token(client, "superadmin@ripple.in", "Super@123", super_console=True)
+    boss = token(client, "superadmin@deport.in", "Super@123", super_console=True)
     assert client.post("/demo/reset", headers=boss).json()["ok"]

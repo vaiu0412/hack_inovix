@@ -67,11 +67,11 @@ For judges and this README only – they are never shown in the app.
 
 | Role | Email / ID | Password |
 |---|---|---|
-| Super Admin (via *Super Admin access* on the sign-in page) | `superadmin@ripple.in` | `Super@123` |
-| Branch Admin – Coimbatore East | `east.admin@ripple.in` (Divya Raman) | `Admin@123` |
-| Branch Admin – Coimbatore Central | `central.admin@ripple.in` (Suresh Kumar) | `Admin@123` |
-| Branch Admin – Coimbatore South | `south.admin@ripple.in` (Meena Sundar) | `Admin@123` |
-| Delivery Partner | `DP101` … `DP106` or `dp101@ripple.in` … (e.g. `DP102` = Karthik, `DP106` = Lakshmi, East's backup van) | `Partner@123` |
+| Super Admin (via *Super Admin access* on the sign-in page) | `superadmin@deport.in` | `Super@123` |
+| Branch Admin – Coimbatore East | `east.admin@deport.in` (Divya Raman) | `Admin@123` |
+| Branch Admin – Coimbatore Central | `central.admin@deport.in` (Suresh Kumar) | `Admin@123` |
+| Branch Admin – Coimbatore South | `south.admin@deport.in` (Meena Sundar) | `Admin@123` |
+| Delivery Partner | `DP101` … `DP106` or `dp101@deport.in` … (e.g. `DP102` = Karthik, `DP106` = Lakshmi, East's backup van) | `Partner@123` |
 
 Emails and IDs are not case-sensitive and spaces are ignored (`dp102`, ` DP102 ` work).
 Partners added by a branch admin get the next free ID (`DP107`, …) and a one-time password shown once.
@@ -117,14 +117,14 @@ never from a form, URL or selectbox. Scoping is enforced in the core code, not o
 
 ## 3-minute demo script
 1. **Sign-in page** – no data visible; note *Login with OTP*, *Continue with Google*, *Super Admin access*.
-2. **Super Admin** (`superadmin@ripple.in`, via *Super Admin access*) → *Overview*: 3 branches with their
+2. **Super Admin** (`superadmin@deport.in`, via *Super Admin access*) → *Overview*: 3 branches with their
    admin, partners, deliveries, delays and open issues side by side → *Branches* / *Branch Admins* (create a branch or
    an admin, deactivate one) → *Audit Log* → *Logout*.
 3. **Phone:** sign in as **`DP102`** (Karthik, East) → *Report Issue* → record
    *"Avinashi road la accident, full block, rendu mani neram aagum"* (or type it) → *Check* →
    "Accident · Avinashi Road · about 2 h · critical" → **Send to manager** → *Logout*.
-4. **Laptop:** sign in as **`central.admin@ripple.in`** – Central sees nothing of it (other branch) → *Logout*.
-5. Sign in as **`east.admin@ripple.in`** → *Command Center* shows "1 issue waiting for your decision" and the
+4. **Laptop:** sign in as **`central.admin@deport.in`** – Central sees nothing of it (other branch) → *Logout*.
+5. Sign in as **`east.admin@deport.in`** → *Command Center* shows "1 issue waiting for your decision" and the
    critical deliveries (KMCH insulin, FreshMart dairy) → *Map & Operations* (blocked road, ripple) →
    *Disruptions & AI* (voice note, transcript, impact: missed deadlines 3 → 0) → **Accept plan** →
    KPIs update ("Deadlines saved: 3"). Optional: *Delivery Partners* → *Add delivery partner* → `DP107`

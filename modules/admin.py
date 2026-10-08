@@ -154,7 +154,7 @@ def add_partner(actor, name, phone, email, vehicle_id, route_roads, shift_start=
                      ("|".join(route_roads or []), vehicle_id, branch_id))
         conn.execute("INSERT INTO users(user_id, email, phone, display_name, role_id, branch_id, dp_id, password_hash, "
                      "salt, created_by, created_at) VALUES (?,?,?,?, 'partner', ?,?,?,?,?,?)",
-                     (dp_id, email or f"{dp_id.lower()}@ripple.in", phone.strip(), name.strip(), branch_id, dp_id,
+                     (dp_id, email or f"{dp_id.lower()}@deport.in", phone.strip(), name.strip(), branch_id, dp_id,
                       hash_hex, salt, actor["user_id"], store.now_iso()))
         store._bump(conn)
     store.audit(actor["user_id"], "partner_created", dp_id, {"vehicle": vehicle_id}, branch_id)
@@ -173,12 +173,12 @@ if __name__ == "__main__":
 
     os.environ["RIPPLE_DB"] = str(Path(tempfile.mkdtemp()) / "admin.db")
     store.init_db()
-    boss = auth.authenticate("superadmin@ripple.in", "Super@123", "super")[0]
+    boss = auth.authenticate("superadmin@deport.in", "Super@123", "super")[0]
     west = create_branch(boss, "Coimbatore West – Vadavalli", "Coimbatore", "Vadavalli", "Thondamuthur Road")
-    create_branch_admin(boss, "Kavya Nair", "west.admin@ripple.in", "+91 90000 10004", west, "Welcome@1")
-    west_admin = auth.authenticate("west.admin@ripple.in", "Welcome@1")[0]
+    create_branch_admin(boss, "Kavya Nair", "west.admin@deport.in", "+91 90000 10004", west, "Welcome@1")
+    west_admin = auth.authenticate("west.admin@deport.in", "Welcome@1")[0]
     print("new branch:", west, "| admin branch:", west_admin["branch_id"])
-    east = auth.authenticate("east.admin@ripple.in", "Admin@123")[0]
+    east = auth.authenticate("east.admin@deport.in", "Admin@123")[0]
     dp_id, temp = add_partner(east, "Ravi", "+91 90000 20007", "", "V9", ["R9", "R1"])
     print("new partner:", dp_id, "| can log in:", bool(auth.authenticate(dp_id, temp)[0]))
     try:

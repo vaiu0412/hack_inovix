@@ -22,12 +22,12 @@ def login(identifier, password, portal="workspace"):
 
 @pytest.fixture()
 def boss(db):
-    return login("superadmin@ripple.in", "Super@123", "super")[0]
+    return login("superadmin@deport.in", "Super@123", "super")[0]
 
 
 @pytest.fixture()
 def east(db):
-    return login("east.admin@ripple.in", "Admin@123")[0]
+    return login("east.admin@deport.in", "Admin@123")[0]
 
 
 # ---------------------------------------------------------------- hashing + login
@@ -43,12 +43,12 @@ def test_passwords_are_hashed_never_plain(db):
 
 
 def test_correct_and_wrong_password(db):
-    assert login("east.admin@ripple.in", "Admin@123")[0]["role"] == "branch_admin"
-    assert login("east.admin@ripple.in", "admin@123") == (None, auth.MESSAGES["bad_credentials"])
-    assert login("nobody@ripple.in", "Admin@123") == (None, auth.MESSAGES["bad_credentials"])
+    assert login("east.admin@deport.in", "Admin@123")[0]["role"] == "branch_admin"
+    assert login("east.admin@deport.in", "admin@123") == (None, auth.MESSAGES["bad_credentials"])
+    assert login("nobody@deport.in", "Admin@123") == (None, auth.MESSAGES["bad_credentials"])
 
 
-@pytest.mark.parametrize("identifier", ["DP102", "dp102", "  Dp102 ", "dp102@ripple.in", " DP102@Ripple.in "])
+@pytest.mark.parametrize("identifier", ["DP102", "dp102", "  Dp102 ", "dp102@deport.in", " DP102@Deport.in "])
 def test_login_by_email_or_partner_id(db, identifier):
     user, error = login(identifier, "Partner@123")
     assert error is None and user["dp_id"] == "DP102" and user["branch_id"] == "CBE-E"
@@ -65,9 +65,9 @@ def test_lockout_after_five_failures(db, monkeypatch):
 
 
 def test_super_admin_has_its_own_door(db):
-    assert login("superadmin@ripple.in", "Super@123")[1] == auth.MESSAGES["use_super_portal"]
-    assert login("superadmin@ripple.in", "Super@123", "super")[0]["role"] == "super_admin"
-    assert login("east.admin@ripple.in", "Admin@123", "super")[1] == auth.MESSAGES["super_only"]
+    assert login("superadmin@deport.in", "Super@123")[1] == auth.MESSAGES["use_super_portal"]
+    assert login("superadmin@deport.in", "Super@123", "super")[0]["role"] == "super_admin"
+    assert login("east.admin@deport.in", "Admin@123", "super")[1] == auth.MESSAGES["super_only"]
     assert login("DP102", "Partner@123", "super")[1] == auth.MESSAGES["super_only"]
 
 
@@ -95,7 +95,7 @@ def test_sessions_remember_me_and_revoke(db, monkeypatch):
 
 # ---------------------------------------------------------------- OTP + forgot password
 def test_otp_login_is_single_use(db):
-    code, message, ok = auth.request_otp("dp102@ripple.in", "login")
+    code, message, ok = auth.request_otp("dp102@deport.in", "login")
     assert ok and code and len(code) == 6 and "…0002" in message
     with store.connect() as conn:
         assert all(code not in str(dict(r)) for r in conn.execute("SELECT * FROM otp_codes"))  # hashed
@@ -115,20 +115,20 @@ def test_otp_expires_and_limits_attempts(db, monkeypatch):
 
 
 def test_forgot_password(db):
-    code, _, ok = auth.request_otp("east.admin@ripple.in", "reset")
+    code, _, ok = auth.request_otp("east.admin@deport.in", "reset")
     assert ok
-    assert auth.reset_password_with_otp("east.admin@ripple.in", code, "short") == (False, auth.MESSAGES["weak_password"])
-    assert auth.reset_password_with_otp("east.admin@ripple.in", code, "NewPass2026") == (True, "Password reset successful")
-    assert login("east.admin@ripple.in", "Admin@123")[0] is None
-    assert login("east.admin@ripple.in", "NewPass2026")[0]["user_id"] == "east.admin"
-    assert auth.reset_password_with_otp("east.admin@ripple.in", code, "Again2026x")[0] is False  # code used
+    assert auth.reset_password_with_otp("east.admin@deport.in", code, "short") == (False, auth.MESSAGES["weak_password"])
+    assert auth.reset_password_with_otp("east.admin@deport.in", code, "NewPass2026") == (True, "Password reset successful")
+    assert login("east.admin@deport.in", "Admin@123")[0] is None
+    assert login("east.admin@deport.in", "NewPass2026")[0]["user_id"] == "east.admin"
+    assert auth.reset_password_with_otp("east.admin@deport.in", code, "Again2026x")[0] is False  # code used
 
 
 # ---------------------------------------------------------------- Super Admin
 def test_super_admin_creates_branch_and_admin(db, boss):
     branch = admin.create_branch(boss, "Coimbatore West – Vadavalli", "Coimbatore", "Vadavalli", "Thondamuthur Road")
-    admin.create_branch_admin(boss, "Kavya Nair", "west.admin@ripple.in", "+91 90000 10004", branch, "Welcome@2026")
-    west = login("west.admin@ripple.in", "Welcome@2026")[0]
+    admin.create_branch_admin(boss, "Kavya Nair", "west.admin@deport.in", "+91 90000 10004", branch, "Welcome@2026")
+    west = login("west.admin@deport.in", "Welcome@2026")[0]
     assert west["role"] == "branch_admin" and west["branch_id"] == branch
     assert store.partners_df(branch).empty and operations.kpis(branch)["deliveries"] == 0   # empty ops
     assert store.list_issues(branch_id=branch) == []
@@ -138,7 +138,7 @@ def test_branch_admin_cannot_manage_branches_or_admins(db, east):
     with pytest.raises(PermissionError):
         admin.create_branch(east, "X", "Coimbatore", "X")
     with pytest.raises(PermissionError):
-        admin.create_branch_admin(east, "Y", "y@ripple.in", "", "CBE-E", "Welcome@2026")
+        admin.create_branch_admin(east, "Y", "y@deport.in", "", "CBE-E", "Welcome@2026")
 
 
 # ---------------------------------------------------------------- branch scoping
@@ -157,7 +157,7 @@ def test_branch_admin_sees_only_own_branch(db, east):
 
 
 def test_branch_admin_adds_partner_who_sees_only_own_data(db, east):
-    dp_id, temp_password = admin.add_partner(east, "Ravi", "+91 90000 20007", "ravi@ripple.in", "V9", ["R9", "R1"])
+    dp_id, temp_password = admin.add_partner(east, "Ravi", "+91 90000 20007", "ravi@deport.in", "V9", ["R9", "R1"])
     ravi = login(dp_id, temp_password)[0]
     assert ravi["dp_id"] == dp_id and ravi["branch_id"] == "CBE-E"
     assert scope.get_partner_deliveries(dp_id, "CBE-E").empty
@@ -171,7 +171,7 @@ def test_branch_admin_adds_partner_who_sees_only_own_data(db, east):
     assert dp_id in set(store.partners_df("CBE-E")["partner_id"])
 
 
-@pytest.mark.parametrize("who, password", [("east.admin@ripple.in", "Admin@123"), ("DP102", "Partner@123")])
+@pytest.mark.parametrize("who, password", [("east.admin@deport.in", "Admin@123"), ("DP102", "Partner@123")])
 def test_deactivated_accounts_cannot_sign_in(db, boss, east, who, password):
     token = auth.create_session(login(who, password)[0]["user_id"])
     if who.startswith("east"):
@@ -185,7 +185,7 @@ def test_deactivated_accounts_cannot_sign_in(db, boss, east, who, password):
 def test_deactivated_branch_blocks_its_people(db, boss):
     token = auth.create_session("DP105")
     admin.set_branch_active(boss, "CBE-S", False)
-    assert login("south.admin@ripple.in", "Admin@123")[1] == auth.MESSAGES["branch_inactive"]
+    assert login("south.admin@deport.in", "Admin@123")[1] == auth.MESSAGES["branch_inactive"]
     assert login("DP105", "Partner@123")[1] == auth.MESSAGES["branch_inactive"]
     assert auth.validate_session(token) is None
     assert login("DP102", "Partner@123")[0]  # other branches keep working
@@ -221,7 +221,21 @@ def test_old_database_is_migrated_in_place(db, tmp_path):
     store.init_db()
     assert store.deliveries_df().set_index("delivery_id").loc["D01", "status"] == "delivered"   # data kept
     assert set(store.partners_df("CBE-E")["partner_id"]) == {"DP101", "DP102", "DP103", "DP106"}
-    assert login("east.admin@ripple.in", "Admin@123")[0]["branch_id"] == "CBE-E"
+    assert login("east.admin@deport.in", "Admin@123")[0]["branch_id"] == "CBE-E"
     assert login("manager", "ripple@123")[0] is None                                              # no duplicate role
     store.init_db()  # running again changes nothing
     assert store.partners_df()["branch_id"].notna().all()
+
+
+def test_v3_database_moves_to_deport_accounts(db):
+    conn = sqlite3.connect(store.db_path())
+    conn.execute("UPDATE users SET email = REPLACE(email, '@deport.in', '@ripple.in')")
+    conn.execute("UPDATE vehicles SET type = 'van', capacity = 40 WHERE vehicle_id = 'V7'")
+    conn.execute("UPDATE meta SET value = '3' WHERE key = 'schema_version'")
+    conn.commit()
+    conn.close()
+
+    store.init_db()
+    assert login("east.admin@deport.in", "Admin@123")[0]["branch_id"] == "CBE-E"
+    assert login("dp102@deport.in", "Partner@123")[0]["dp_id"] == "DP102"
+    assert store.vehicles_df("CBE-C").set_index("vehicle_id").loc["V7", "type"] == "car"

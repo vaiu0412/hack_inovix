@@ -38,7 +38,7 @@ if st.button("Generate temporary password", icon=":material/password:", key="gen
 with st.form("create_admin", clear_on_submit=True):
     c1, c2 = st.columns(2)
     name = c1.text_input("Full name")
-    email = c2.text_input("Email", placeholder="west.admin@ripple.in")
+    email = c2.text_input("Email", placeholder="west.admin@deport.in")
     c3, c4 = st.columns(2)
     phone = c3.text_input("Phone", placeholder="+91 90000 10004")
     branch = c4.selectbox("Branch", branches["branch_id"].tolist(),

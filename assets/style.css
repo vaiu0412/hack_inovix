@@ -1,4 +1,4 @@
-/* Ripple – small additions on top of the Streamlit theme (.streamlit/config.toml).
+/* DEPORT – small additions on top of the Streamlit theme (.streamlit/config.toml).
    Colours that must work in light AND dark mode use translucent greys or the status palette. */
 
 .block-container { padding-top: 3.2rem; padding-bottom: 3rem; }

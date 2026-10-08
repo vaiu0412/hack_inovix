@@ -167,7 +167,7 @@ with st.container(key="login_page"):
     brand_col, card_col = st.columns([1.1, 1], gap="large", vertical_alignment="center")
     with brand_col:
         st.markdown(f"""<div class="rp-brand">{ROUTES_SVG}<div class="rp-ripple"><span></span><span></span><span></span></div>
-<div><div class="rp-mark">{LOGO}<span>RIPPLE</span></div>
+<div><div class="rp-mark">{LOGO}<span>DEPORT</span></div>
 <div class="rp-hero" style="margin-top:56px"><h1>AI-Powered Disruption-Aware Logistics</h1>
 <p>From Disruption to Decision in Under a Minute.</p>
 <ul class="rp-feats"><li><span>{icon('mic')}</span>Voice issue reporting</li>
@@ -184,11 +184,11 @@ with st.container(key="login_page"):
 
         # ------------------------------------------------ sign in
         if view == "signin":
-            st.markdown("<p class='rp-title'>Welcome back</p><p class='rp-sub'>Sign in to your RIPPLE workspace</p>",
+            st.markdown("<p class='rp-title'>Welcome back</p><p class='rp-sub'>Sign in to your DEPORT</p>",
                         unsafe_allow_html=True)
             flash()
             with st.form("signin_form", border=False, enter_to_submit=True):
-                identifier = st.text_input("Email or User ID", placeholder="you@ripple.in or DP102", key="si_id",
+                identifier = st.text_input("Email or User ID", placeholder="you@deport.in or DP102", key="si_id",
                                            autocomplete="username")
                 password = st.text_input("Password", type="password", key="si_pw", autocomplete="current-password")
                 left, right = st.columns(2, vertical_alignment="center")
@@ -223,14 +223,14 @@ with st.container(key="login_page"):
             flash()
             if st.session_state.get("otp_step", 1) == 1:
                 with st.form("otp_send", border=False):
-                    ident = st.text_input("Email or User ID", placeholder="you@ripple.in or DP102", key="otp_id")
+                    ident = st.text_input("Email or User ID", placeholder="you@deport.in or DP102", key="otp_id")
                     send = st.form_submit_button("Send code", type="primary", width="stretch")
                 if send:
                     code, text, ok = auth.request_otp(ident, "login")
                     if ok:
                         st.session_state.update(otp_step=2, otp_ident=ident, otp_sent=time.time(), otp_demo=code)
                         if code:
-                            st.toast(f"📱 Demo SMS: Your RIPPLE login code is {code}")
+                            st.toast(f"📱 Demo SMS: Your DEPORT login code is {code}")
                         show(text, "success")
                     else:
                         show(text)
@@ -253,7 +253,7 @@ with st.container(key="login_page"):
                     code, text, ok = auth.request_otp(st.session_state.get("otp_ident"), "login")
                     st.session_state.update(otp_sent=time.time(), otp_demo=code)
                     if code:
-                        st.toast(f"📱 Demo SMS: Your RIPPLE login code is {code}")
+                        st.toast(f"📱 Demo SMS: Your DEPORT login code is {code}")
                     show(text, "success" if ok else "error")
                     st.rerun()
             if st.button("Back to sign in", icon=":material/arrow_back:", type="tertiary", key="otp_back"):
@@ -267,14 +267,14 @@ with st.container(key="login_page"):
             flash()
             if st.session_state.get("reset_step", 1) == 1:
                 with st.form("reset_send", border=False):
-                    ident = st.text_input("Email or User ID", placeholder="you@ripple.in or DP102", key="reset_id")
+                    ident = st.text_input("Email or User ID", placeholder="you@deport.in or DP102", key="reset_id")
                     send = st.form_submit_button("Send reset code", type="primary", width="stretch")
                 if send:
                     code, text, ok = auth.request_otp(ident, "reset")
                     if ok:
                         st.session_state.update(reset_step=2, reset_ident=ident, reset_sent=time.time(), reset_demo=code)
                         if code:
-                            st.toast(f"📱 Demo SMS: Your RIPPLE reset code is {code}")
+                            st.toast(f"📱 Demo SMS: Your DEPORT reset code is {code}")
                         show(text, "success")
                     else:
                         show(text)
@@ -310,7 +310,7 @@ with st.container(key="login_page"):
                         "audit log</small></div></div>", unsafe_allow_html=True)
             flash()
             with st.form("super_form", border=False, enter_to_submit=True):
-                identifier = st.text_input("Super Admin email", placeholder="you@ripple.in", key="sa_id",
+                identifier = st.text_input("Super Admin email", placeholder="you@deport.in", key="sa_id",
                                            autocomplete="username")
                 password = st.text_input("Password", type="password", key="sa_pw", autocomplete="current-password")
                 submitted = st.form_submit_button("Sign in to console", type="primary", width="stretch")

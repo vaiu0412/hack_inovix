@@ -9,6 +9,7 @@ Set RIPPLE_DB to use another database file (the tests use a temporary one).
 import json
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +20,7 @@ from modules.data_loader import (DATA_DIR, NOW_MIN, hhmm_to_min, load_all, load_
                                  nearest_place)
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS branches (
     branch_id TEXT PRIMARY KEY, name TEXT NOT NULL, city TEXT, area TEXT, address TEXT, lat REAL, lng REAL,
@@ -82,13 +83,13 @@ ROLE_PERMISSIONS = {
 }
 # Demo accounts (also listed in the README; never shown in the app).
 DEMO_ADMINS = [
-    {"user_id": "superadmin", "email": "superadmin@ripple.in", "display_name": "Super Admin", "role": "super_admin",
+    {"user_id": "superadmin", "email": "superadmin@deport.in", "display_name": "Super Admin", "role": "super_admin",
      "branch_id": None, "phone": "+91 90000 10000", "password": "Super@123"},
-    {"user_id": "east.admin", "email": "east.admin@ripple.in", "display_name": "Divya Raman", "role": "branch_admin",
+    {"user_id": "east.admin", "email": "east.admin@deport.in", "display_name": "Divya Raman", "role": "branch_admin",
      "branch_id": "CBE-E", "phone": "+91 90000 10001", "password": "Admin@123"},
-    {"user_id": "central.admin", "email": "central.admin@ripple.in", "display_name": "Suresh Kumar",
+    {"user_id": "central.admin", "email": "central.admin@deport.in", "display_name": "Suresh Kumar",
      "role": "branch_admin", "branch_id": "CBE-C", "phone": "+91 90000 10002", "password": "Admin@123"},
-    {"user_id": "south.admin", "email": "south.admin@ripple.in", "display_name": "Meena Sundar",
+    {"user_id": "south.admin", "email": "south.admin@deport.in", "display_name": "Meena Sundar",
      "role": "branch_admin", "branch_id": "CBE-S", "phone": "+91 90000 10003", "password": "Admin@123"},
 ]
 DEMO_PARTNER_PASSWORD = "Partner@123"
@@ -107,14 +108,42 @@ def now_iso():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+_tx = threading.local()  # the open transaction of this thread (each Streamlit session runs in its own thread)
+
+
 @contextmanager
 def connect():
+    shared = getattr(_tx, "conn", None)
+    if shared is not None:  # inside transaction(): same connection, committed once at the end
+        yield shared
+        return
     conn = sqlite3.connect(db_path(), timeout=10)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
         conn.commit()
     finally:
+        conn.close()
+
+
+@contextmanager
+def transaction():
+    """Run many reads/writes as ONE transaction: all of them are applied, or none (e.g. accepting a plan)."""
+    if getattr(_tx, "conn", None) is not None:
+        yield _tx.conn
+        return
+    conn = sqlite3.connect(db_path(), timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("BEGIN IMMEDIATE")
+    _tx.conn = conn
+    try:
+        yield conn
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
+    finally:
+        _tx.conn = None
         conn.close()
 
 
@@ -151,8 +180,10 @@ def init_db():
     with connect() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
         current = int(row["value"]) if row else 0
-        if current < SCHEMA_VERSION:
+        if current < 3:
             _migrate_v3(conn)
+        if current < 4:
+            _migrate_v4(conn)
 
 
 def _seed_reference(conn):
@@ -180,7 +211,7 @@ def _seed_users(conn):
                      hash_hex, salt, "system"))
     for p in conn.execute("SELECT partner_id, name, phone, branch_id FROM partners ORDER BY partner_id"):
         hash_hex, salt = demo_hash(p["partner_id"], DEMO_PARTNER_PASSWORD)
-        rows.append((p["partner_id"], f"{p['partner_id'].lower()}@ripple.in", p["phone"], p["name"], "partner",
+        rows.append((p["partner_id"], f"{p['partner_id'].lower()}@deport.in", p["phone"], p["name"], "partner",
                      p["branch_id"], p["partner_id"], hash_hex, salt, "system"))
     conn.executemany("INSERT INTO users(user_id, email, phone, display_name, role_id, branch_id, dp_id, "
                      "password_hash, salt, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -217,11 +248,24 @@ def _migrate_v3(conn):
         conn.execute("DROP TABLE users")
         conn.execute("DROP TABLE IF EXISTS login_attempts")
         conn.executescript(SCHEMA)
-        _seed_users(conn)  # the old 'manager' becomes east.admin@ripple.in (no duplicate manager role)
+        _seed_users(conn)  # the old 'manager' becomes east.admin@deport.in (no duplicate manager role)
+    _set_version(conn, 3)
+
+
+def _migrate_v4(conn):
+    """RIPPLE -> DEPORT: demo accounts move to @deport.in; the spare Central van becomes a car."""
+    conn.execute("UPDATE users SET email = REPLACE(email, '@ripple.in', '@deport.in') "
+                 "WHERE created_by = 'system' AND email LIKE '%@ripple.in'")
+    conn.execute("UPDATE vehicles SET type = 'car', capacity = 15 WHERE vehicle_id = 'V7' AND type = 'van' "
+                 "AND status = 'spare'")
+    _set_version(conn, 4)
+
+
+def _set_version(conn, version):
     conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE "
-                 "SET value = excluded.value", (str(SCHEMA_VERSION),))
+                 "SET value = excluded.value", (str(version),))
     conn.execute("INSERT INTO audit_log(time, actor_user_id, action, target, details_json) VALUES (?,?,?,?,?)",
-                 (now_iso(), "system", "migrate", "database", json.dumps({"to_version": SCHEMA_VERSION})))
+                 (now_iso(), "system", "migrate", "database", json.dumps({"to_version": version})))
     _bump(conn)
 
 

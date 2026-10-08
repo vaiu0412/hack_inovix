@@ -186,7 +186,7 @@ LLM_COOLDOWN_SEC = 300  # after a failure, skip the LLM for 5 minutes
 GROQ_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "llama-3.1-8b-instant"]
 # Groq's firewall (Cloudflare) blocks Python's default "Python-urllib" identity with
 # HTTP 403 "error code: 1010", so every AI request names the app instead.
-USER_AGENT = "Ripple/2.0 (+https://github.com/vaiu0412/hack_inovix)"
+USER_AGENT = "DEPORT/2.0 (+https://github.com/vaiu0412/hack_inovix)"
 # last outcome of an AI call, shown on the Activity page (never contains the key)
 LLM_STATUS = {"provider": None, "model": None, "ok_at": None, "error": None, "error_at": None}
 _llm_paused_until = 0.0

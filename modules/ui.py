@@ -10,8 +10,13 @@ from modules import guards, store
 from modules.data_loader import NOW_MIN, min_to_hhmm
 from modules.parser import setting
 
-CSS_PATH = Path(__file__).resolve().parent.parent / "assets" / "style.css"
-TEAM_NAME = setting("TEAM_NAME", "Team Ripple")  # shown on the home page; set TEAM_NAME in secrets to change
+ASSETS = Path(__file__).resolve().parent.parent / "assets"
+CSS_PATH = ASSETS / "style.css"
+LOGO_PATH, MARK_PATH, FAVICON_PATH = ASSETS / "logo.svg", ASSETS / "logo_mark.svg", ASSETS / "favicon.png"
+APP_NAME = "DEPORT"
+APP_TITLE = "DEPORT – Disruption-Aware Logistics Decision Support System"
+TAGLINE = "From Disruption to Decision."
+TEAM_NAME = setting("TEAM_NAME", "Team DEPORT")  # sign-in page footer; set TEAM_NAME in secrets to change
 BRAND = "#2563EB"
 RISK_CLASS = {"Critical": "rp-critical", "High": "rp-high", "Medium": "rp-medium", "Low": "rp-low"}
 RISK_HEX = {"Critical": "#DC2626", "High": "#EA580C", "Medium": "#CA8A04", "Low": "#16A34A", "On track": "#64748B"}
@@ -39,7 +44,7 @@ def setup_store():
 
 def setup_page(layout="wide"):
     # auto: the menu is open on laptops and folded away on phones
-    st.set_page_config(page_title="RIPPLE", page_icon=":material/route:", layout=layout,
+    st.set_page_config(page_title=APP_NAME, page_icon=str(FAVICON_PATH), layout=layout,
                        initial_sidebar_state="auto")
     st.markdown(f"<style>{CSS_PATH.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
 
@@ -151,8 +156,8 @@ def sidebar_user():
 
         profile = partner_scope.get_partner_profile(user["dp_id"], user["branch_id"])
         line = f"{user['dp_id']} · {profile['vehicle_type'].title()} {profile['reg_no']}"
+    st.logo(str(LOGO_PATH), icon_image=str(MARK_PATH), size="large")
     with st.sidebar:
-        st.markdown(f'<div class="rp-side-logo">{LOGO_SMALL}<span>RIPPLE</span></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="rp-person"><div class="rp-avatar" style="background:{colour}">'
                     f'{escape(initials(user["display_name"]))}</div><div><b>{escape(user["display_name"])}</b><br>'
                     f'<small>{escape(line)}</small></div></div><div style="margin:8px 0 2px">{badge(label, css)}</div>'

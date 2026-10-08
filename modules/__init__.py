@@ -1,1 +1,1 @@
-"""Ripple modules: data loading, parsing, impact, risk, recommendations and visuals."""
+"""DEPORT modules: data loading, parsing, impact, risk, recommendations and visuals."""

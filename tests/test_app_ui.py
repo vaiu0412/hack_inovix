@@ -79,13 +79,13 @@ def test_sign_in_page_shows_nothing_else(db):
 
 
 def test_sign_in_errors(db):
-    assert sign_in("east.admin@ripple.in", "wrong").error[0].value == "Incorrect email/ID or password"
-    assert "Super Admin access" in sign_in("superadmin@ripple.in", "Super@123").error[0].value
-    assert "Super Admins only" in sign_in("east.admin@ripple.in", "Admin@123", super_console=True).error[0].value
+    assert sign_in("east.admin@deport.in", "wrong").error[0].value == "Incorrect email/ID or password"
+    assert "Super Admin access" in sign_in("superadmin@deport.in", "Super@123").error[0].value
+    assert "Super Admins only" in sign_in("east.admin@deport.in", "Admin@123", super_console=True).error[0].value
 
 
 def test_super_admin_pages(db):
-    at = sign_in("superadmin@ripple.in", "Super@123", super_console=True)
+    at = sign_in("superadmin@deport.in", "Super@123", super_console=True)
     assert at.session_state["role"] == "super_admin"
     assert [m.label for m in at.metric][:2] == ["Branches", "Active branches"]
     for page in guards.SUPER_PAGES.values():
@@ -93,7 +93,7 @@ def test_super_admin_pages(db):
 
 
 def test_branch_admin_pages_are_scoped(db):
-    at = sign_in("East.Admin@ripple.in", "Admin@123")
+    at = sign_in("East.Admin@deport.in", "Admin@123")
     assert at.session_state["branch_id"] == "CBE-E" and "Coimbatore East" in text_of(at)
     assert "Murugan" in text_of(at) and "Priya" not in text_of(at)          # Priya works in Central
     for page in guards.BRANCH_PAGES.values():
@@ -127,10 +127,10 @@ def test_guards_block_wrong_roles(db):
 
 def test_otp_login(db):
     at = start("otp")
-    at.text_input(key="otp_id").set_value("dp102@ripple.in")
+    at.text_input(key="otp_id").set_value("dp102@deport.in")
     click(at, "Send code")
     code = at.session_state["otp_demo"]
-    at = ok(fresh(login_view="otp", otp_step=2, otp_ident="dp102@ripple.in", otp_demo=code).run())
+    at = ok(fresh(login_view="otp", otp_step=2, otp_ident="dp102@deport.in", otp_demo=code).run())
     assert "Demo SMS" in " ".join(i.value for i in at.info)
     at.text_input(key="otp_code").set_value(code)
     click(at, "Verify and sign in")
@@ -168,8 +168,8 @@ def test_full_demo_flow(db):
     logout(at)
 
     # Central's admin sees nothing; East's admin sees the critical alert and accepts
-    assert "waiting for your decision" not in text_of(sign_in("central.admin@ripple.in", "Admin@123"))
-    at = sign_in("east.admin@ripple.in", "Admin@123")
+    assert "waiting for your decision" not in text_of(sign_in("central.admin@deport.in", "Admin@123"))
+    at = sign_in("east.admin@deport.in", "Admin@123")
     assert "waiting for your decision" in text_of(at) and "Critical" in text_of(at)
     at.switch_page(guards.BRANCH_PAGES["disruptions"]).run()
     click(at, "Accept plan")

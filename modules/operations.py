@@ -96,6 +96,9 @@ def _single_stop_plan(problem, data):
     late = new_eta > row["deadline_min"]
     driver = problem.get("reporter_name", "the driver")
     action = {
+        "title": f"Re-attempt {row['delivery_id']} later",
+        "why_short": f"Customer not reachable.\n{'Misses ' + row['deadline'] + ', ask for a new slot.' if late else 'Still fits before ' + row['deadline'] + '.'}",
+        "impact_short": f"New ETA {min_to_hhmm(new_eta)}",
         "action_type": "reschedule_notify", "target": f"delivery {row['delivery_id']}",
         "description": f"Re-attempt {row['customer']} at the end of {driver}'s route (~{min_to_hhmm(new_eta)})",
         "why": (f"{row['customer']} isn't reachable now. Trying again after the other stops costs nothing; "
@@ -108,7 +111,7 @@ def _single_stop_plan(problem, data):
             {"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer", "customer": row["customer"],
              "phone": row["customer_phone"],
              "text": f"Hi {row['customer']}, our partner could not reach you. We will try again at about "
-                     f"{min_to_hhmm(new_eta)}. Reply with a better time if needed. – Ripple Logistics"},
+                     f"{min_to_hhmm(new_eta)}. Reply with a better time if needed. – DEPORT Logistics"},
         ],
     }
     return {
@@ -197,62 +200,64 @@ def accept(issue_id, decided_by="Manager", branch_id=None):
     plan = issue.get("plan")
     if not plan or plan["kind"] == "needs_location":
         raise ValueError("This issue has no plan yet")
-    partner_by_vehicle = {p["vehicle_id"]: p for p in store.partners_df(branch).to_dict("records")}
-    changed = {"deliveries": 0, "partners_told": set(), "customers_told": 0}
+    # one transaction: deliveries, routes, messages, the block, the issue and the log change together or not at all
+    with store.transaction():
+        partner_by_vehicle = {p["vehicle_id"]: p for p in store.partners_df(branch).to_dict("records")}
+        changed = {"deliveries": 0, "partners_told": set(), "customers_told": 0}
 
-    # 1) deliveries: new vehicle, ETA, deadline, stop order
-    backup_stops = {}
-    for row in plan["after"]:
-        fields = {"vehicle_id": row["vehicle_id"], "planned_eta": row["new_eta"], "deadline": row["deadline"],
-                  "note": row["action"]}
-        if row["action"] == "reassigned":
-            backup_stops.setdefault(row["vehicle_id"], []).append(row)
-        if "stop_order" in row:
-            fields["stop_order"] = row["stop_order"]
-        store.update_delivery(row["delivery_id"], branch_id=branch, **fields)
-        changed["deliveries"] += 1
-    for vehicle_id, rows in backup_stops.items():  # backup van: stops in ETA order
-        for order, row in enumerate(sorted(rows, key=lambda r: r["new_eta"]), start=1):
-            store.update_delivery(row["delivery_id"], branch_id=branch, stop_order=order)
-        partner = partner_by_vehicle.get(vehicle_id)
-        if partner and partner["status"] != "on_duty":
-            store.set_partner_status(partner["partner_id"], "on_duty")
+        # 1) deliveries: new vehicle, ETA, deadline, stop order
+        backup_stops = {}
+        for row in plan["after"]:
+            fields = {"vehicle_id": row["vehicle_id"], "planned_eta": row["new_eta"], "deadline": row["deadline"],
+                      "note": row["action"]}
+            if row["action"] == "reassigned":
+                backup_stops.setdefault(row["vehicle_id"], []).append(row)
+            if "stop_order" in row:
+                fields["stop_order"] = row["stop_order"]
+            store.update_delivery(row["delivery_id"], branch_id=branch, **fields)
+            changed["deliveries"] += 1
+        for vehicle_id, rows in backup_stops.items():  # backup van: stops in ETA order
+            for order, row in enumerate(sorted(rows, key=lambda r: r["new_eta"]), start=1):
+                store.update_delivery(row["delivery_id"], branch_id=branch, stop_order=order)
+            partner = partner_by_vehicle.get(vehicle_id)
+            if partner and partner["status"] != "on_duty":
+                store.set_partner_status(partner["partner_id"], "on_duty")
 
-    # 2) routes: blocked road replaced by the detour
-    blocked = (plan.get("disruption") or {}).get("road_id")
-    vehicles = store.vehicles_df(branch).set_index("vehicle_id")
-    for action in plan["actions"]:
-        if action["action_type"] == "reroute" and blocked and action.get("via_roads"):
-            vid = action["target"].replace("vehicle ", "")
-            route = [action["via_roads"][0] if r == blocked else r for r in vehicles.loc[vid, "route_roads"]]
-            store.set_route(vid, list(dict.fromkeys(route)), branch_id=branch)
+        # 2) routes: blocked road replaced by the detour
+        blocked = (plan.get("disruption") or {}).get("road_id")
+        vehicles = store.vehicles_df(branch).set_index("vehicle_id")
+        for action in plan["actions"]:
+            if action["action_type"] == "reroute" and blocked and action.get("via_roads"):
+                vid = action["target"].replace("vehicle ", "")
+                route = [action["via_roads"][0] if r == blocked else r for r in vehicles.loc[vid, "route_roads"]]
+                store.set_route(vid, list(dict.fromkeys(route)), branch_id=branch)
 
-    # 3) messages: partner inboxes and customer SMS
-    for action in plan["actions"]:
-        for message in action.get("messages", []):
-            if message.get("kind") == "driver":
-                partner = partner_by_vehicle.get(message.get("vehicle_id"))
-                if partner:
-                    store.add_message(message["text"], to_partner=partner["partner_id"], issue_id=issue_id,
-                                      branch_id=branch)
-                    changed["partners_told"].add(partner["partner_id"])
-            elif message.get("kind") == "customer":
-                store.add_message(message["text"], to_customer=message.get("customer"), to_phone=message.get("phone"),
-                                  channel="sms", issue_id=issue_id, branch_id=branch)
-                changed["customers_told"] += 1
-    reporter = issue.get("partner_id")
-    if reporter and reporter not in changed["partners_told"] and reporter in {p["partner_id"] for p in partner_by_vehicle.values()}:
-        store.add_message(f"Thanks, your report was handled: {plan['headline']}.", to_partner=reporter,
-                          issue_id=issue_id, branch_id=branch)
+        # 3) messages: partner inboxes and customer SMS
+        for action in plan["actions"]:
+            for message in action.get("messages", []):
+                if message.get("kind") == "driver":
+                    partner = partner_by_vehicle.get(message.get("vehicle_id"))
+                    if partner:
+                        store.add_message(message["text"], to_partner=partner["partner_id"], issue_id=issue_id,
+                                          branch_id=branch)
+                        changed["partners_told"].add(partner["partner_id"])
+                elif message.get("kind") == "customer":
+                    store.add_message(message["text"], to_customer=message.get("customer"), to_phone=message.get("phone"),
+                                      channel="sms", issue_id=issue_id, branch_id=branch)
+                    changed["customers_told"] += 1
+        reporter = issue.get("partner_id")
+        if reporter and reporter not in changed["partners_told"] and reporter in {p["partner_id"] for p in partner_by_vehicle.values()}:
+            store.add_message(f"Thanks, your report was handled: {plan['headline']}.", to_partner=reporter,
+                              issue_id=issue_id, branch_id=branch)
 
-    # 4) the road stays blocked for future plans; close the issue; refresh other open plans
-    if plan["kind"] == "ripple" and plan.get("disruption", {}).get("road_id") and \
-            plan["disruption"]["type"] not in ("breakdown",) + NO_RIPPLE_TYPES:
-        store.add_disruption(issue_id, plan["disruption"], branch_id=branch)
-    store.update_issue(issue_id, status="accepted", decided_at=store.now_stamp(), decision_note=f"Accepted by {decided_by}")
-    text = (f"{decided_by} accepted the plan for #{issue_id}: {changed['deliveries']} deliveries updated, "
-            f"{len(changed['partners_told'])} partners and {changed['customers_told']} customers notified")
-    store.log_event("decision", text, issue_id, branch_id=branch)
+        # 4) the road stays blocked for future plans; close the issue; refresh other open plans
+        if plan["kind"] == "ripple" and plan.get("disruption", {}).get("road_id") and \
+                plan["disruption"]["type"] not in ("breakdown",) + NO_RIPPLE_TYPES:
+            store.add_disruption(issue_id, plan["disruption"], branch_id=branch)
+        store.update_issue(issue_id, status="accepted", decided_at=store.now_stamp(), decision_note=f"Accepted by {decided_by}")
+        text = (f"{decided_by} accepted the plan for #{issue_id}: {changed['deliveries']} deliveries updated, "
+                f"{len(changed['partners_told'])} partners and {changed['customers_told']} customers notified")
+        store.log_event("decision", text, issue_id, branch_id=branch)
     for other in store.list_issues(("analysed",), branch_id=branch):
         analyse(other["issue_id"])  # the branch changed, so its other plans must too
     return text

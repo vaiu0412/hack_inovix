@@ -32,7 +32,7 @@ else:
         name = c1.text_input("Full name", key=f"ap_name_{form_round}")
         phone = c2.text_input("Phone", placeholder="+91 90000 20007", key=f"ap_phone_{form_round}")
         c3, c4 = st.columns(2)
-        email = c3.text_input("Email (optional)", placeholder="name@ripple.in", key=f"ap_email_{form_round}")
+        email = c3.text_input("Email (optional)", placeholder="name@deport.in", key=f"ap_email_{form_round}")
         vehicle = c4.selectbox("Vehicle", free["vehicle_id"].tolist(), format_func=lambda v: (
             lambda r: f"{r['type'].title()} {r['reg_no']} ({v})")(free.set_index("vehicle_id").loc[v]))
         route = st.multiselect("Route (roads in driving order)", list(road_names), format_func=road_names.get)

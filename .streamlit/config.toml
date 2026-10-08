@@ -1,28 +1,19 @@
 [theme]
+# DEPORT dark glass theme (the glass, glow and gradient blobs live in assets/style.css)
+base = "dark"
+primaryColor = "#3B82F6"
+backgroundColor = "#070B14"
+secondaryBackgroundColor = "#0F172A"
+textColor = "#E2E8F0"
+borderColor = "#1F2A44"
+linkColor = "#60A5FA"
+dataframeHeaderBackgroundColor = "#111A2E"
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
 baseFontSize = 15
-baseRadius = "10px"
+baseRadius = "12px"
 buttonRadius = "12px"
 showWidgetBorder = true
-showSidebarBorder = true
-
-[theme.light]
-primaryColor = "#2563EB"
-backgroundColor = "#F6F8FB"
-secondaryBackgroundColor = "#FFFFFF"
-textColor = "#0F172A"
-borderColor = "#E5E7EB"
-dataframeHeaderBackgroundColor = "#F1F5F9"
-linkColor = "#2563EB"
-
-[theme.dark]
-primaryColor = "#60A5FA"
-backgroundColor = "#0D1117"
-secondaryBackgroundColor = "#161B22"
-textColor = "#E6EDF3"
-borderColor = "#2A313B"
-dataframeHeaderBackgroundColor = "#1B212A"
-linkColor = "#60A5FA"
+showSidebarBorder = false
 
 [server]
 headless = true

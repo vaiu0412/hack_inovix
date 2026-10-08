@@ -6,8 +6,7 @@ from modules import auth, login_ui as lui, ui
 
 lui.page_css()
 st.markdown("<div style='height:10vh'></div>", unsafe_allow_html=True)
-_, middle, _ = st.columns([1, 1.2, 1])
-with middle, st.container(key="login_card"):
+with st.container(key="login_card"):
     st.markdown(f"<div class='lg-console'>{ui.MARK_SVG}<div>Admin console<small>Super Admins only</small></div></div>",
                 unsafe_allow_html=True)
     message = st.session_state.pop("console_msg", None)

@@ -50,12 +50,9 @@ if lui.google_configured():
             lui.finish(user)
         show(error)
 
+lui.brand_header()
 with st.container(key="login_page"):
-    brand_col, card_col = st.columns([1.1, 1], gap="large", vertical_alignment="center")
-    with brand_col:
-        lui.brand_panel()
-
-    with card_col, st.container(key="login_card"):
+    with st.container(key="login_card"):
         message = st.session_state.pop("login_msg", None)
 
         def flash():
@@ -67,7 +64,7 @@ with st.container(key="login_page"):
 
         # ------------------------------------------------ sign in
         if view == "signin":
-            st.markdown("<p class='lg-title'>Welcome back</p><p class='lg-sub'>Sign in to DEPORT</p>",
+            st.markdown("<p class='lg-title'>Welcome back</p><p class='lg-sub2'>Sign in to DEPORT</p>",
                         unsafe_allow_html=True)
             flash()
             with st.form("signin_form", border=False, enter_to_submit=True):
@@ -99,7 +96,7 @@ with st.container(key="login_page"):
 
         # ------------------------------------------------ OTP sign-in
         elif view == "otp":
-            st.markdown("<p class='lg-title'>Sign in with OTP</p><p class='lg-sub'>Code to your phone</p>",
+            st.markdown("<p class='lg-title'>Sign in with OTP</p><p class='lg-sub2'>Code to your phone</p>",
                         unsafe_allow_html=True)
             flash()
             if st.session_state.get("otp_step", 1) == 1:
@@ -141,7 +138,7 @@ with st.container(key="login_page"):
 
         # ------------------------------------------------ forgot password
         elif view == "forgot":
-            st.markdown("<p class='lg-title'>Reset password</p><p class='lg-sub'>Code to your phone</p>",
+            st.markdown("<p class='lg-title'>Reset password</p><p class='lg-sub2'>Code to your phone</p>",
                         unsafe_allow_html=True)
             flash()
             if st.session_state.get("reset_step", 1) == 1:
@@ -180,3 +177,5 @@ with st.container(key="login_page"):
             if st.button("Back to sign in", icon=":material/arrow_back:", type="tertiary", key="reset_back"):
                 go("signin", reset_step=1, reset_demo=None)
                 st.rerun()
+
+lui.footer()

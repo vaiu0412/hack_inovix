@@ -35,19 +35,16 @@ for i, b in enumerate(summary.to_dict("records")):
                            ("Alerts", b["open_issues"])]), unsafe_allow_html=True)
 
 ui.section("Deliveries by branch", "bar_chart")
-ink, grid = ("#E6EDF3", "rgba(230,237,243,.10)") if ui.is_dark() else ("#334155", "rgba(15,23,42,.08)")
 chart = summary.sort_values("deliveries")
 figure = go.Figure(go.Bar(
     y=chart["name"], x=chart["deliveries"], orientation="h", marker=dict(color=ui.BRAND, cornerradius=4),
-    width=0.5, text=chart["deliveries"], textposition="outside", textfont=dict(color=ink),
+    width=0.5, text=chart["deliveries"], textposition="outside",
     customdata=chart[["delivered", "delayed", "critical"]],
     hovertemplate="<b>%{y}</b><br>%{x} deliveries · %{customdata[0]} done<br>"
                   "%{customdata[1]} delayed · %{customdata[2]} critical<extra></extra>",
 ))
-figure.update_layout(height=60 + 56 * len(chart), margin=dict(l=8, r=40, t=8, b=8), showlegend=False,
-                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color=ink, family="Inter"),
-                     xaxis=dict(showgrid=True, gridcolor=grid, zeroline=False, title=None),
-                     yaxis=dict(showgrid=False, title=None))
+ui.style_figure(figure, height=60 + 56 * len(chart))
+figure.update_layout(xaxis=dict(title=None), yaxis=dict(title=None))
 with ui.card("chart"):
     st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
 with st.expander("Table view", icon=":material/table:"):

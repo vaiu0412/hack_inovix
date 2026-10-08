@@ -20,21 +20,21 @@ TAGLINE = "From Disruption to Decision."
 TEAM_NAME = setting("TEAM_NAME", "Team DEPORT")  # sign-in page footer; set TEAM_NAME in secrets to change
 MARK_SVG = MARK_PATH.read_text(encoding="utf-8").split("-->", 1)[-1].strip()
 MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">' + MARK_SVG
-BRAND, NAVY, AMBER = "#2563EB", "#0B1E3F", "#F59E0B"
+BRAND, NAVY, AMBER = "#3B82F6", "#0B1E3F", "#F59E0B"
 
 # one status language everywhere: key -> (word, css class, dot colour, emoji for tables/tooltips)
 STATUS = {
-    "normal": ("Normal", "dp-s-normal", "#16A34A", "🟢"),
-    "delayed": ("Delayed", "dp-s-delayed", "#EAB308", "🟡"),
-    "critical": ("Critical", "dp-s-critical", "#DC2626", "🔴"),
-    "available": ("Available", "dp-s-available", "#2563EB", "🔵"),
+    "normal": ("Normal", "dp-s-normal", "#22C55E", "🟢"),
+    "delayed": ("Delayed", "dp-s-delayed", "#FACC15", "🟡"),
+    "critical": ("Critical", "dp-s-critical", "#F43F5E", "🔴"),
+    "available": ("Available", "dp-s-available", "#38BDF8", "🔵"),
     "break": ("Break", "dp-s-off", "#94A3B8", "⚪"),
     "off": ("Off", "dp-s-off", "#94A3B8", "⚪"),
-    "done": ("Done", "dp-s-normal", "#16A34A", "✅"),
+    "done": ("Done", "dp-s-normal", "#22C55E", "✅"),
     "unassigned": ("Unassigned", "dp-s-off", "#94A3B8", "⚪"),
 }
 RISK_STATE = {"Critical": "critical", "High": "delayed", "Medium": "delayed", "Low": "normal"}
-RISK_HEX = {"Critical": "#DC2626", "High": "#CA8A04", "Medium": "#CA8A04", "Low": "#16A34A", "On track": "#64748B"}
+RISK_HEX = {"Critical": "#F43F5E", "High": "#FACC15", "Medium": "#FACC15", "Low": "#22C55E", "On track": "#94A3B8"}
 VEHICLE_EMOJI = {"bike": "🏍️", "car": "🚗", "van": "🚐", "truck": "🚚"}
 VEHICLE_ICON = {"bike": ":material/two_wheeler:", "car": ":material/directions_car:", "van": ":material/airport_shuttle:",
                 "truck": ":material/local_shipping:"}
@@ -61,22 +61,16 @@ def setup_page(layout="wide", role=None):
     if role == "partner":  # mobile-first: one column, thumb-sized buttons
         extra += (".stButton button, .stFormSubmitButton button, .stLinkButton a, .stDownloadButton button "
                   "{ min-height: 52px; font-size: 16px; border-radius: 14px; }")
-    if is_dark():
-        extra += (":root { --dp-bg:#0D1117; --dp-card:#161B22; --dp-border:#2A313B; --dp-text:#E6EDF3; --dp-muted:#9CA3AF;"
-                  " --dp-ink-normal:#4ADE80; --dp-ink-delayed:#FACC15; --dp-ink-critical:#F87171; --dp-ink-available:#60A5FA;"
-                  " --dp-ink-off:#CBD5E1; --dp-shadow:none; --dp-shadow-hover:0 8px 24px rgba(0,0,0,.35); }"
-                  ".dp-skel { background: linear-gradient(90deg,#1B212A 25%,#232B36 37%,#1B212A 63%); background-size:400% 100%; }"
-                  ".st-key-alert_banner { background: rgba(220,38,38,.12); border-color: rgba(220,38,38,.4); }"
-                  ".dp-alert { color: #FCA5A5; }")
     st.markdown(f"<style>{CSS_PATH.read_text(encoding='utf-8')}{extra}</style>", unsafe_allow_html=True)
     st.session_state["_card_n"] = 0
 
 
 def is_dark():
+    """DEPORT uses one dark glass theme (.streamlit/config.toml: base = "dark")."""
     try:
-        return st.context.theme.type == "dark"
+        return st.context.theme.type != "light"
     except Exception:
-        return False
+        return True
 
 
 def clock_text():
@@ -226,8 +220,8 @@ def progress_ring(done, total, size=84):
     r, c = 34, 2 * 3.14159 * 34
     return (f'<div class="dp-ring"><svg width="{size}" height="{size}" viewBox="0 0 84 84" role="img" '
             f'aria-label="{done} of {total} delivered"><circle cx="42" cy="42" r="{r}" fill="none" '
-            f'stroke="var(--dp-border)" stroke-width="9"/>'
-            + (f'<circle cx="42" cy="42" r="{r}" fill="none" stroke="#16A34A" stroke-width="9" stroke-linecap="round" '
+            f'stroke="rgba(255,255,255,.12)" stroke-width="9"/>'
+            + (f'<circle cx="42" cy="42" r="{r}" fill="none" stroke="#22C55E" stroke-width="9" stroke-linecap="round" '
                f'stroke-dasharray="{c * share:.1f} {c:.1f}" transform="rotate(-90 42 42)"/>' if done else "")
             + f'<text x="42" y="47" text-anchor="middle" font-size="17" font-weight="750" '
             f'fill="var(--dp-text)">{done}/{total}</text></svg><div><div class="n">{done} of {total}</div>'

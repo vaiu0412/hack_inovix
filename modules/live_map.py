@@ -1,7 +1,7 @@
 """Realistic live map (Leaflet via folium, no API key).
 
-- Basemaps (all free, no key): Esri World Street Map (default, Google-Maps-like), OpenStreetMap, Esri light grey,
-  Esri satellite. (CARTO Voyager/Positron now require an API key, so they are not used.)
+- Basemaps (all free, no key): Esri Dark Gray (default, matches the dark glass UI), Esri World Street Map,
+  OpenStreetMap, Esri satellite. (CARTO Dark Matter / Voyager now require an API key, so they are not used.)
 - Roads follow real streets: shapes come from the OSRM cache (store.route_geometry), never fetched here.
 - Vehicles: white disc with a status-coloured ring and a vehicle icon; Critical ones pulse.
 - Stops: small numbered pins coloured by risk. Disruptions: red radius + ⚠️, blocked road thick red dashed,
@@ -18,47 +18,58 @@ from modules import geometry as geo
 from modules import store
 from modules.data_loader import COIMBATORE_CENTER, load_places, road_midpoint
 
-STATE = {  # same status language as modules/ui.py
-    "normal": ("Normal", "#16A34A"), "delayed": ("Delayed", "#EAB308"), "critical": ("Critical", "#DC2626"),
-    "available": ("Available", "#2563EB"), "break": ("Break", "#94A3B8"), "off": ("Off", "#94A3B8"),
+STATE = {  # same status language as modules/ui.py (neon-soft on the dark map)
+    "normal": ("Normal", "#22C55E"), "delayed": ("Delayed", "#FACC15"), "critical": ("Critical", "#F43F5E"),
+    "available": ("Available", "#38BDF8"), "break": ("Break", "#94A3B8"), "off": ("Off", "#94A3B8"),
 }
+ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services"
+ESRI_ATTR = "Tiles © Esri — Esri, HERE, Garmin, © OpenStreetMap contributors"
 RISK_STATE = {"Critical": "critical", "High": "delayed", "Medium": "delayed", "Low": "normal"}
 VEHICLE_EMOJI = {"bike": "🏍️", "car": "🚗", "van": "🚐", "truck": "🚚"}
 RADIUS_M = {"critical": 900, "high": 700, "medium": 500, "low": 350}
-BLOCKED, DETOUR, SELECTED, ROUTE, DONE = "#DC2626", "#16A34A", "#2563EB", "#94A3B8", "#9CA3AF"
+BLOCKED, DETOUR, SELECTED, ROUTE, DONE = "#F43F5E", "#22C55E", "#3B82F6", "#94A3B8", "#64748B"
 
 MAP_CSS = """
 <style>
-.dp-veh { position: relative; width: 34px; height: 34px; border-radius: 50%; background: #fff; border: 4px solid var(--c);
-  display: flex; align-items: center; justify-content: center; font-size: 17px; line-height: 1;
-  box-shadow: 0 2px 8px rgba(15,23,42,.35); box-sizing: border-box; }
-.dp-veh.sel { transform: scale(1.22); box-shadow: 0 0 0 5px rgba(37,99,235,.30), 0 2px 10px rgba(15,23,42,.4); }
-.dp-veh.fade { opacity: .45; }
-.dp-veh.pulse::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; border: 3px solid rgba(220,38,38,.6);
+.leaflet-container { background: #070B14; font-family: Inter, Arial, sans-serif; }
+.dp-veh { position: relative; width: 34px; height: 34px; border-radius: 50%; background: rgba(15,23,42,.72);
+  backdrop-filter: blur(6px); border: 3px solid var(--c); display: flex; align-items: center; justify-content: center;
+  font-size: 17px; line-height: 1; box-shadow: 0 0 14px var(--c), 0 4px 14px rgba(0,0,0,.55); box-sizing: border-box; }
+.dp-veh.sel { transform: scale(1.22); box-shadow: 0 0 0 5px rgba(59,130,246,.35), 0 0 22px var(--c); }
+.dp-veh.fade { opacity: .42; }
+.dp-veh.pulse::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; border: 3px solid rgba(244,63,94,.65);
   animation: dp-ring 1.6s ease-out infinite; }
 @keyframes dp-ring { 0% { transform: scale(.7); opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
-.dp-stop { width: 20px; height: 20px; border-radius: 50%; color: #fff; font: 700 11px/1 Inter, Arial, sans-serif;
-  display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-sizing: border-box;
-  box-shadow: 0 1px 4px rgba(0,0,0,.35); }
-.dp-stop.fade { opacity: .4; }
-.dp-warn { width: 34px; height: 34px; border-radius: 50%; background: #fff; border: 3px solid #DC2626; display: flex;
-  align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 2px 10px rgba(220,38,38,.45); box-sizing: border-box; }
-.dp-legend { background: rgba(255,255,255,.95); border-radius: 10px; padding: 8px 10px; font: 600 11px/1.5 Inter, Arial, sans-serif;
-  color: #0F172A; box-shadow: 0 2px 10px rgba(15,23,42,.18); }
+.dp-stop { width: 20px; height: 20px; border-radius: 50%; color: #0B1220; font: 800 11px/1 Inter, Arial, sans-serif;
+  display: flex; align-items: center; justify-content: center; border: 2px solid rgba(255,255,255,.85); box-sizing: border-box;
+  box-shadow: 0 0 10px rgba(0,0,0,.6); }
+.dp-stop.fade { opacity: .35; }
+.dp-warn { width: 34px; height: 34px; border-radius: 50%; background: rgba(15,23,42,.8); border: 3px solid #F43F5E; display: flex;
+  align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 0 18px rgba(244,63,94,.7); box-sizing: border-box; }
+.dp-legend { background: rgba(15,23,42,.78); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.14);
+  border-radius: 12px; padding: 8px 10px; font: 600 11px/1.5 Inter, Arial, sans-serif; color: #E2E8F0;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45); }
 .dp-legend span { display: inline-flex; align-items: center; gap: 5px; margin-right: 8px; white-space: nowrap; }
 .dp-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
 .dp-legend b { width: 16px; height: 0; border-top: 3px solid; display: inline-block; }
-.leaflet-tooltip { font: 600 12px/1.4 Inter, Arial, sans-serif; border-radius: 8px; }
+.leaflet-tooltip { font: 600 12px/1.4 Inter, Arial, sans-serif; border-radius: 8px; background: rgba(15,23,42,.92);
+  color: #F8FAFC; border: 1px solid rgba(255,255,255,.16); box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+.leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { display: none; }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: rgba(15,23,42,.95); color: #E2E8F0; }
 .leaflet-popup-content { font: 13px/1.45 Inter, Arial, sans-serif; margin: 10px 12px; }
-.leaflet-control-attribution { font-size: 9px !important; opacity: .8; }
+.leaflet-popup-content b { font-size: 14px; color: #F8FAFC; }
+.leaflet-control-layers, .leaflet-bar a { background: rgba(15,23,42,.85) !important; color: #E2E8F0 !important;
+  border-color: rgba(255,255,255,.14) !important; }
+.leaflet-control-attribution { font-size: 9px !important; opacity: .7; background: rgba(15,23,42,.6) !important; color: #94A3B8 !important; }
+.leaflet-control-attribution a { color: #94A3B8 !important; }
 @media (max-width: 640px) { .dp-legend { font-size: 10px; padding: 6px 8px; max-width: 220px; } }
 @media (prefers-reduced-motion: reduce) { .dp-veh.pulse::after { animation: none; } }
 </style>"""
 
-LEGEND = ("<span><i style='background:#16A34A'></i>Normal</span><span><i style='background:#EAB308'></i>Delayed</span>"
-          "<span><i style='background:#DC2626'></i>Critical</span><span><i style='background:#2563EB'></i>Available</span><br>"
-          "<span><b style='border-color:#DC2626;border-top-style:dashed'></b>Blocked</span>"
-          "<span><b style='border-color:#16A34A'></b>Alternate</span><span><b style='border-color:#2563EB'></b>Route</span>")
+LEGEND = ("<span><i style='background:#22C55E'></i>Normal</span><span><i style='background:#FACC15'></i>Delayed</span>"
+          "<span><i style='background:#F43F5E'></i>Critical</span><span><i style='background:#38BDF8'></i>Available</span><br>"
+          "<span><b style='border-color:#F43F5E;border-top-style:dashed'></b>Blocked</span>"
+          "<span><b style='border-color:#22C55E'></b>Alternate</span><span><b style='border-color:#3B82F6'></b>Route</span>")
 
 
 class Legend(MacroElement):
@@ -124,11 +135,15 @@ def disruption_point(d, roads, shapes):
 
 
 def add_tiles(m, switcher=True):
-    """Free, keyless basemaps. (CARTO Voyager/Positron/Dark Matter now need an API key, so Esri is used.)"""
-    folium.TileLayer(xyz.Esri.WorldStreetMap, name="Map", max_zoom=19).add_to(m)
+    """Free, keyless basemaps; dark by default to match the glass UI. (CARTO Dark Matter / Voyager now need an
+    API key, so Esri's Dark Gray canvas + labels is the default.)"""
+    folium.TileLayer(f"{ESRI}/Canvas/World_Dark_Gray_Base/MapServer/tile/{{z}}/{{y}}/{{x}}", attr=ESRI_ATTR,
+                     name="Dark", max_native_zoom=16, max_zoom=19).add_to(m)
+    folium.TileLayer(f"{ESRI}/Canvas/World_Dark_Gray_Reference/MapServer/tile/{{z}}/{{y}}/{{x}}", attr=ESRI_ATTR,
+                     name="Labels", overlay=True, control=False, max_native_zoom=16, max_zoom=19).add_to(m)
     if switcher:
-        folium.TileLayer(xyz.OpenStreetMap.Mapnik, name="Street", show=False).add_to(m)
-        folium.TileLayer(xyz.Esri.WorldGrayCanvas, name="Light", show=False).add_to(m)
+        folium.TileLayer(xyz.Esri.WorldStreetMap, name="Street", show=False, max_zoom=19).add_to(m)
+        folium.TileLayer(xyz.OpenStreetMap.Mapnik, name="OpenStreetMap", show=False).add_to(m)
         folium.TileLayer(xyz.Esri.WorldImagery, name="Satellite", show=False).add_to(m)
     return m
 
@@ -255,5 +270,5 @@ if __name__ == "__main__":
               detour_roads=["R9"], risk_labels={"D06": "Critical"}, selected="DP102",
               states={"DP102": "critical", "DP106": "available"})
     html = m.get_root().render()
-    assert "DP102 · Karthik · 🏍️ · Critical" in html and "dp-legend" in html and "World_Street_Map" in html
+    assert "DP102 · Karthik · 🏍️ · Critical" in html and "dp-legend" in html and "World_Dark_Gray_Base" in html
     print("map html:", len(html), "chars\nlive_map OK")

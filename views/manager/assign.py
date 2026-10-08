@@ -54,7 +54,8 @@ with tab_queue:
 
 # ---------------------------------------------------------------- new order
 with tab_new, ui.card("new_order"):
-    with st.form("new_order_form", border=False):
+    form_round = st.session_state.get("new_order_round", 0)  # a new form key empties the fields after saving
+    with st.form(f"new_order_form_{form_round}", border=False):
         c1, c2 = st.columns(2)
         customer = c1.text_input("Customer", placeholder="Anand Stores")
         phone = c2.text_input("Phone", placeholder="+91 90000 30001")
@@ -77,7 +78,10 @@ with tab_new, ui.card("new_order"):
         elif save:
             order_id, place = assign.create_order(actor, customer, phone, area, category, priority,
                                                   deadline.strftime("%H:%M"), size or "small", notes)
-            st.success(f"{order_id} saved · {place['place']}. It is in the queue.", icon=":material/check_circle:")
+            # kept in session: the live refresh reruns the page right after a save
+            st.session_state["assign_msg"] = f"{order_id} saved · {place['place']}. It is in the queue."
+            st.session_state["new_order_round"] = form_round + 1
+            st.rerun()
         elif not place:
             st.error("Place not found. Try another name.", icon=":material/location_off:")
     place = st.session_state.get("new_order_place")

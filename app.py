@@ -72,3 +72,4 @@ ui.live_updates()  # one refresh watcher for every page, at a fixed place in the
 if "_welcome" in st.session_state:
     st.toast(st.session_state.pop("_welcome"))
 navigation.run()
+ui.mark_seen()  # this session's own writes don't trigger a refresh (one-time messages and passwords stay visible)

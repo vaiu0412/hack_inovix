@@ -304,6 +304,11 @@ def resume_live_updates():
     st.session_state.pop("_pause_until", None)
 
 
+def mark_seen():
+    """End of a run: everything up to now is on screen, so only OTHER devices' changes refresh the page."""
+    st.session_state["_seen_version"] = store.version()
+
+
 def live_updates(every="4s"):
     """Re-run the page when anything changes in the shared database (another device acted).
 

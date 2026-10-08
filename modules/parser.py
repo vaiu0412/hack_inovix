@@ -9,6 +9,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 
 from modules.places import best_road
@@ -179,19 +180,26 @@ def parse_rules(text, data):
 
 # ---------------------------------------------------------------- optional LLM
 LLM_COOLDOWN_SEC = 300  # after a failure, skip the LLM for 5 minutes
+# Groq chat models open to normal (free/developer) keys, best first. Override with GROQ_MODEL.
+GROQ_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "llama-3.1-8b-instant"]
 _llm_paused_until = 0.0
 
 
 def setting(name, default=None):
-    """Read a key from environment variables, or from Streamlit secrets when deployed."""
+    """Read a key from environment variables, or from Streamlit secrets when deployed.
+
+    Placeholders copied from secrets.toml.example ("paste-your-...") count as not set.
+    """
     value = os.getenv(name)
-    if value:
-        return value
-    try:
-        import streamlit as st
-        return st.secrets.get(name, default)
-    except Exception:  # no secrets file -> just use the default
+    if not value:
+        try:
+            import streamlit as st
+            value = st.secrets.get(name)
+        except Exception:  # no secrets file
+            value = None
+    if not value or str(value).startswith("paste-your"):
         return default
+    return value
 
 
 def offline():
@@ -232,16 +240,26 @@ def _call_provider(prompt, want_json, timeout):
 
     if setting("GROQ_API_KEY"):
         url = "https://api.groq.com/openai/v1/chat/completions"
-        body = {
-            "model": setting("GROQ_MODEL", "llama-3.3-70b-versatile"),
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-        }
-        if want_json:
-            body["response_format"] = {"type": "json_object"}
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {setting('GROQ_API_KEY')}"}
-        reply = _post_json(url, body, headers, timeout)
-        return reply["choices"][0]["message"]["content"]
+        last_error = None
+        # Groq retires or restricts models over time, so try the next one if a model is refused.
+        for model in dict.fromkeys([setting("GROQ_MODEL"), *GROQ_MODELS]):
+            if not model:
+                continue
+            body = {"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
+            if model.startswith("openai/gpt-oss"):
+                body["reasoning_effort"] = "low"  # quick answers for short extraction tasks
+            if want_json:
+                body["response_format"] = {"type": "json_object"}
+            try:
+                reply = _post_json(url, body, headers, timeout)
+            except urllib.error.HTTPError as error:
+                if error.code in (400, 403, 404):  # model not available for this key -> next model
+                    last_error = error
+                    continue
+                raise
+            return reply["choices"][0]["message"]["content"]
+        raise RuntimeError(f"No Groq model accepted the request: {last_error}")
 
     raise RuntimeError("No LLM API key set")
 

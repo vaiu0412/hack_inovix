@@ -22,7 +22,9 @@ ACTION_LABELS = {"reassign": ("Reassign to backup", "#DC2626"), "reroute": ("Rer
 
 
 def setup_page(layout="wide"):
-    st.set_page_config(page_title="Ripple", page_icon=":material/route:", layout=layout)
+    # collapsed: on phones the navigation menu must not cover the page on every load
+    st.set_page_config(page_title="Ripple", page_icon=":material/route:", layout=layout,
+                       initial_sidebar_state="collapsed")
     st.markdown(f"<style>{CSS_PATH.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
     store.init_db()
 

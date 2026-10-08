@@ -6,7 +6,8 @@ import streamlit as st
 from modules import operations, store, ui
 from modules.report_ui import report_form
 
-st.set_page_config(page_title="Ripple · Partner", page_icon=":material/two_wheeler:", layout="centered")
+st.set_page_config(page_title="Ripple · Partner", page_icon=":material/two_wheeler:", layout="centered",
+                   initial_sidebar_state="collapsed")
 
 partners = store.partners_df()
 ids = partners["partner_id"].tolist()

@@ -63,7 +63,7 @@ def sign_in(identifier, password, super_console=False):
 def logout(at):
     at = continue_session(at)
     token = at.session_state["token"]
-    click(at, "Logout", at.sidebar)
+    click(at, "Sign out", at.sidebar)
     assert "authenticated" not in at.session_state and auth.validate_session(token) is None
 
 
@@ -87,7 +87,7 @@ def test_sign_in_errors(db):
 def test_super_admin_pages(db):
     at = sign_in("superadmin@deport.in", "Super@123", super_console=True)
     assert at.session_state["role"] == "super_admin"
-    assert [m.label for m in at.metric][:2] == ["Branches", "Active branches"]
+    assert "Branches" in text_of(at) and "dp-kpi" in text_of(at)
     for page in guards.SUPER_PAGES.values():
         ok(at.switch_page(page).run())
 

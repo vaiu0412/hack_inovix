@@ -1,18 +1,18 @@
 [theme]
-font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, sans-serif"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap, sans-serif"
 baseFontSize = 15
-baseRadius = "0.6rem"
-buttonRadius = "0.6rem"
+baseRadius = "10px"
+buttonRadius = "12px"
 showWidgetBorder = true
 showSidebarBorder = true
 
 [theme.light]
 primaryColor = "#2563EB"
-backgroundColor = "#F6F7F9"
+backgroundColor = "#F6F8FB"
 secondaryBackgroundColor = "#FFFFFF"
-textColor = "#111827"
-borderColor = "#E2E5EA"
-dataframeHeaderBackgroundColor = "#F1F3F6"
+textColor = "#0F172A"
+borderColor = "#E5E7EB"
+dataframeHeaderBackgroundColor = "#F1F5F9"
 linkColor = "#2563EB"
 
 [theme.dark]

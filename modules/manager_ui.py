@@ -123,7 +123,8 @@ def partner_panel(ctx, pid):
         return
     with st.container(border=True):
         st.markdown(ui.person(p["name"], f"{p['partner_id']} · {p['vehicle_type'].title()} · {p['reg_no']} · "
-                                         f"near {p['area']}", p["status"]), unsafe_allow_html=True)
+                                         f"near {p['area']}", ui.STATUS[ui.partner_state(p["status"])][2]),
+                    unsafe_allow_html=True)
         st.markdown(ui.kv([
             ("Status", ui.partner_badge(p["status"])),
             ("Phone", f"<a href='tel:{escape(p['phone'])}'>{escape(p['phone'])}</a>"),
@@ -270,20 +271,10 @@ def issue_card(ctx, issue, compact=False):
                 st.markdown(f"**Impact** · {plan.get('headline', '')}")
                 ba = plan.get("before_after") or {}
                 if ba:
-                    m1, m2, m3 = st.columns(3)
-                    m1.markdown(f"<small>Deliveries hit</small><br><span class='rp-ba'>"
-                                f"{plan['summary']['affected_deliveries']}</span>", unsafe_allow_html=True)
-                    m2.markdown(f"<small>Missed deadlines</small><br>"
-                                f"{ui.before_after(ba['misses_before'], ba['misses_after'])}", unsafe_allow_html=True)
-                    m3.markdown(f"<small>Delay (min)</small><br>"
-                                f"{ui.before_after(ba['delay_before'], ba['delay_after'])}", unsafe_allow_html=True)
-                ui.ai_note(plan.get("note", ""))
+                    ui.before_after([("Missed deadlines", ba["misses_before"], ba["misses_after"]),
+                                     ("Delay (min)", ba["delay_before"], ba["delay_after"])])
                 if plan.get("actions"):
-                    st.markdown("**Recommended actions**")
-                    ui.actions_list(plan["actions"][:5])
-                    if len(plan["actions"]) > 5 and not compact:
-                        with st.expander(f"All {len(plan['actions'])} actions"):
-                            ui.actions_list(plan["actions"][5:])
+                    st.markdown("".join(ui.rec_card(a) for a in plan["actions"][:5]), unsafe_allow_html=True)
                 if issue["status"] == "analysed":
                     accept_col, reject_col = st.columns([2, 1])
                     if accept_col.button("Accept plan", type="primary", key=f"accept_{issue['issue_id']}",

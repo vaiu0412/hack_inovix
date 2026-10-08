@@ -2,9 +2,9 @@
 
 > Every disruption creates a ripple. Ripple shows how far it spreads – and how to stop it.
 
-**Live demo:** <https://ripple-coimbatore.streamlit.app> ·
-partner phone link: <https://ripple-coimbatore.streamlit.app/partner?id=P1> (Murugan) ·
-free hosting – if it says the app is asleep, wake it and wait about a minute.
+**Live demo:** <https://ripple-coimbatore.streamlit.app> – sign in as a manager on a laptop and as a
+delivery partner on a phone (credentials below). Free hosting: if it says the app is asleep, wake it
+and wait about a minute.
 
 ## The problem
 A single accident, flood or flat tyre in a city like Coimbatore quietly breaks dozens of delivery
@@ -24,36 +24,66 @@ Demo numbers (2-hour accident on Avinashi Road): **9 deliveries on 3 vehicles hi
 deadlines 3 → 0, delay 855 → 154 min**, insulin for KMCH delivered by the backup van at 10:44
 (deadline 11:30).
 
-## 3-minute demo script (two devices)
-1. **Laptop:** open *Operations* – live map of Coimbatore, 5 partners on duty, 30 deliveries, 0 issues.
-2. **Phone:** open the partner link for **Murugan (P1)** → *Report a problem* → record
+## Login & roles
+The app opens on a sign-in page – nothing else (no menu, data, KPIs or map) is shown before login.
+Choose **Manager** or **Delivery Partner**, then ID and password. After login you only get the pages
+of your role:
+
+| Role | Pages |
+|---|---|
+| Manager | Command Center · Map & Operations · Delivery Partners · Deliveries · Disruptions & AI · History |
+| Delivery Partner | Today · My Deliveries · Report Issue · My History (own data only) |
+
+### Demo credentials
+| Role | ID | Password |
+|---|---|---|
+| Manager | `manager` | `ripple@123` |
+| Delivery Partner | `DP101` … `DP106` (e.g. `DP102` = Karthik, `DP106` = Lakshmi, backup van) | `partner@123` |
+
+IDs are not case-sensitive and spaces are ignored (`dp102`, ` DP102 ` work). Passwords are stored only
+as PBKDF2-SHA256 hashes (100 000 iterations, own salt per account); 5 wrong attempts lock an ID for
+60 seconds. *Reset demo data* (managers only, in the sidebar) restores all accounts.
+
+### How partner data is isolated
+A partner's identity comes only from the login session (or the API token) – never from a form, URL or
+selectbox. Partner pages read and write exclusively through `modules/partner_scope.py`, whose functions
+take that `dp_id` and touch only the partner's own rows in SQL (deliveries joined on the partner's own
+vehicle, own messages, own reports). Writes such as *Delivered* check ownership in the `WHERE` clause and
+raise `PermissionError` for anyone else's delivery; reports are always filed as the logged-in partner.
+Every page also calls `require_role(...)` first, so a page reached directly shows "Access denied".
+
+## 3-minute demo script
+1. **Home** – the sign-in page (no data visible).
+2. **Phone:** sign in as **Delivery Partner `DP102`** (Karthik) → *Report Issue* → record
    *"Avinashi road la accident, full block, rendu mani neram aagum"* (or type it) → *Check* →
-   "Accident · Avinashi Road · about 2 h · critical" → **Send to manager**.
-3. **Laptop (within ~4 s):** banner "1 issue waiting for your decision" → *Review*. Show the voice
-   note, transcript, what the AI understood, the impact (3 → 0 missed deadlines) and the dispatcher
-   note. Open *Deliveries at risk, map and how the delay spreads*.
-4. Tap **Accept plan** → KPIs update ("Deadlines saved: 3"), the map shows the detour in green.
-5. **Phone:** Murugan sees "hand D06 to Lakshmi" and the detour. Switch to **Lakshmi (P6)** – the
-   standby van now has the insulin and dairy pickups. Tap *Delivered*.
-6. Bonus: tap any partner on the map for their details; search and download the team spreadsheet;
-   type a misspelled place ("pelamedu", "R.S.Puram", "அவிநாசி சாலை") – it still works.
-7. Before the next run: *Operations → Activity → Reset demo*.
+   "Accident · Avinashi Road · about 2 h · critical" → **Send to manager** → *Logout*.
+3. **Laptop:** sign in as **Manager** → *Command Center* shows "1 issue waiting for your decision" and the
+   critical deliveries (KMCH insulin, FreshMart dairy).
+4. *Map & Operations* – the blocked road, the ripple, tap a partner for details.
+5. *Disruptions & AI* – voice note, transcript, what the AI understood, impact (missed deadlines 3 → 0)
+   and the dispatcher note → **Accept plan** → KPIs update ("Deadlines saved: 3") → *Logout*.
+6. **Phone:** sign in as **`DP102`** again → *Today* shows the new instructions (avoid Avinashi Road, take
+   the Peelamedu–Hope College stretch, hand the dairy to Lakshmi) and *My Deliveries* is updated.
+   Bonus: sign in as **`DP106`** (Lakshmi) – the backup van now has the insulin and dairy pickups.
+7. Before the next run: sidebar → *Reset demo data* (manager).
 
 ## Features
-**Operations (manager)**
-- KPI tiles, live map (tap a partner → popup + detail panel with phone, shift, deliveries, stops)
-- Team spreadsheet below the map: search, filter by status, select a row, download CSV
-- Issues inbox with voice-note player, transcript, AI understanding + confidence, impact,
-  dispatcher note, actions with reasons, **Accept / Correct it / Reject**, risk table, ripple map,
-  dependency graph, message preview
-- Deliveries table with changes (reassigned / rerouted / re-attempt), customer SMS outbox,
-  activity log, one-click demo reset, *Log an issue* for problems heard by phone
+**Manager**
+- *Command Center*: KPI tiles, decision alert, deliveries at risk, delivery partner status, latest activity
+- *Map & Operations*: live map – tap a delivery partner → popup + detail panel (phone, shift, stops)
+- *Delivery Partners*: spreadsheet with search, status filter, row selection and CSV download
+- *Disruptions & AI*: voice-note player, transcript, AI understanding + confidence, impact, dispatcher
+  note, actions with reasons, **Accept / Correct it / Reject**, risk table, ripple map, dependency graph,
+  message preview, *Log an issue* for problems heard by phone
+- *Deliveries*: every order with changes (reassigned / rerouted / re-attempt) and the customer SMS outbox
+- *History*: decided issues, activity log, AI status line
 
-**Partner app (phone first)**
-- Next stop card with *Delivered* and *Call*, my stops, my reports with live status
-- Report by quick button, voice note or text; "We understood …" check before sending;
-  if no place is recognised, tap one of *your own* roads
-- Messages from operations with *Got it*; on duty / on break / standby
+**Delivery Partner (phone first)**
+- *Today*: "Hi Karthik 👋", new instructions with *Got it*, progress, next stop with *Delivered* and *Call*
+- *My Deliveries*: own route on a map and all own stops
+- *Report Issue*: quick button, voice note or text; "We understood …" check before sending; if no place
+  is recognised, tap one of *your own* roads
+- *My History*: own reports with status, instructions received, completed deliveries
 
 **AI that degrades gracefully**
 | Step | With a key | Without any key |
@@ -91,7 +121,7 @@ flowchart LR
 pip install -r requirements.txt
 streamlit run app.py                 # app on http://localhost:8501
 uvicorn api.main:app --reload        # mobile API, docs on http://localhost:8000/docs
-python -m pytest -q                  # 72 tests, no internet or keys needed
+python -m pytest -q                  # 101 tests, no internet or keys needed
 ```
 **Optional AI key (recommended for voice):** get a free key at <https://console.groq.com/keys>,
 copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and paste it there
@@ -100,16 +130,23 @@ copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and paste it
 ## Mobile app plan
 The Streamlit app is already phone-first (one-thumb buttons, no hover-only information,
 light/dark theme, deep links per partner). For a native Android/iOS app (Flutter or React Native),
-all business logic is in `modules/` (no UI code) and exposed by `api/main.py`:
-`GET /partners/{id}`, `POST /issues/voice`, `POST /issues/{id}/accept`, `GET /map`, … – the
-same database, so the native app and the web console can run side by side.
+all business logic is in `modules/` (no UI code) and exposed by `api/main.py` with token login:
+`POST /login` returns a signed token (set `RIPPLE_SECRET_KEY` in production). Partner apps use
+`/me`, `/me/deliveries`, `/me/issues/voice`, `/me/deliveries/{id}/delivered` – the partner ID comes
+only from the token. Manager apps use `/kpis`, `/map`, `/issues`, `/issues/{id}/accept`, … – the same
+database, so the native app and the web console can run side by side.
 
 ## Project structure
 ```
-app.py                 navigation (Home · Operations · Partner app), theme
-views/                 home.py · manager.py · partner.py
+app.py                 sign-in first, then role-only navigation + sidebar (user, Logout)
+views/home.py          sign-in page
+views/manager/         command_center · map_ops · partners · deliveries · disruptions · history
+views/partner/         today · my_deliveries · report_issue · my_history
 modules/
-  store.py             shared live data (SQLite) – partners, deliveries, issues, messages, events
+  store.py             shared live data (SQLite) – partners, deliveries, issues, messages, users
+  auth.py · security.py   login, PBKDF2 password hashes, lockout
+  guards.py            require_role() for every page; session keys
+  partner_scope.py     the ONLY data access for partner pages (own rows, ownership-checked writes)
   places.py            fuzzy place matching (typos, no spaces, short forms, Tamil)
   parser.py            text → disruption (rules, Tanglish, optional LLM)
   voice.py             speech-to-text chain
@@ -117,10 +154,10 @@ modules/
   impact.py · risk.py · recommender.py   the ripple model and the plan
   operations.py        analyse / dispatcher note / accept / reject / KPIs
   live_map.py · graph_viz.py             map and dependency graph
-  ui.py · report_ui.py                   shared UI components
+  ui.py · report_ui.py · manager_ui.py   shared UI components
 api/main.py            REST API for the native app
 data/                  roads, vehicles, deliveries, partners, places (real Coimbatore coordinates)
-tests/                 scenario, places, issue flow, API and UI click-through tests
+tests/                 scenario, places, issue flow, auth, isolation, API and UI click-through tests
 docs/RIPPLE_V2_PROMPT.md   the build prompt, incl. the team's own words
 ```
 
@@ -132,7 +169,8 @@ docs/RIPPLE_V2_PROMPT.md   the build prompt, incl. the team's own words
 - **Real roads?** Real Coimbatore roads and places with real coordinates; routing is simplified to
   named road segments (no live traffic feed) – plugging in a routing API is the next step.
 - **Privacy?** Voice notes stay in your own database; with no keys nothing leaves the server except
-  the free speech fallback. Real authentication is needed before production (the demo has a role picker).
+  the free speech fallback. Logins use hashed passwords and lockout; for production add HTTPS-only
+  deployment, password reset and per-company accounts.
 
 ## Team module ownership
 | Member | Owns |

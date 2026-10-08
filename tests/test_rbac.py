@@ -167,6 +167,8 @@ def test_branch_admin_adds_partner_who_sees_only_own_data(db, east):
         scope.mark_delivered("DP102", "CBE-E", "D25")               # Arun's (South) delivery
     with pytest.raises(PermissionError):
         admin.add_partner(east, "Z", "+91 1", "", "V7", [])         # V7 belongs to Central
+    store.init_db()                                                 # app restart keeps the new partner
+    assert dp_id in set(store.partners_df("CBE-E")["partner_id"])
 
 
 @pytest.mark.parametrize("who, password", [("east.admin@ripple.in", "Admin@123"), ("DP102", "Partner@123")])

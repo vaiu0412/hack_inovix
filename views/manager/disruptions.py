@@ -3,7 +3,7 @@ import streamlit as st
 
 from modules import guards, manager_ui as mui, ui
 
-guards.require_role("manager")
+guards.require_role("branch_admin")
 ui.header("Disruptions & AI", "Review what delivery partners reported and approve the AI recovery plan.")
 ui.live_updates()
 ctx = mui.context()

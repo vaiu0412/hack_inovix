@@ -3,12 +3,12 @@ import streamlit as st
 
 from modules import guards, manager_ui as mui, ui
 
-guards.require_role("manager")
+guards.require_role("branch_admin")
 ui.header("Command Center", "Everything that needs your attention, in one place.")
 ui.live_updates()
 ctx = mui.context()
 
-mui.kpi_tiles()
+mui.kpi_tiles(ctx)
 mui.alert_banner(ctx)
 
 left, right = st.columns([1.4, 1], gap="medium")
@@ -49,5 +49,5 @@ with right:
 
 st.markdown("##### Latest activity")
 with st.container(border=True):
-    mui.activity_feed(limit=6)
+    mui.activity_feed(ctx, limit=6)
 mui.ai_status_line()

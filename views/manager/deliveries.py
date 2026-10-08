@@ -3,12 +3,12 @@ import streamlit as st
 
 from modules import guards, manager_ui as mui, store, ui
 
-guards.require_role("manager")
+guards.require_role("branch_admin")
 ui.header("Deliveries", "All of today's orders and the messages sent to customers.")
 ui.live_updates()
 ctx = mui.context()
 
-deliveries = store.deliveries_df()
+deliveries = store.deliveries_df(branch_id=ctx["branch_id"])
 deliveries["risk"] = deliveries["delivery_id"].map(mui.risk_labels_now(ctx["open_issues"])).fillna("")
 partners = ctx["partners"]
 deliveries["driver"] = deliveries["vehicle_id"].map(dict(zip(partners["vehicle_id"], partners["name"])))
@@ -31,7 +31,7 @@ st.dataframe(view[list(columns)].rename(columns=columns)
 st.download_button("Download deliveries (CSV)", view[list(columns)].rename(columns=columns).to_csv(index=False),
                    "ripple-deliveries.csv", "text/csv", icon=":material/download:")
 
-sms = store.customer_messages()
+sms = store.customer_messages(branch_id=ctx["branch_id"])
 st.markdown(f"##### Customer messages ({len(sms)})")
 if len(sms):
     st.dataframe(sms.rename(columns={"created_at": "Time", "issue_id": "Issue", "to_customer": "Customer",

@@ -24,12 +24,24 @@ ACTION_LABELS = {"reassign": ("Reassign to backup", "#DC2626"), "reroute": ("Rer
                  "resequence": ("Prioritise stop", "#CA8A04"), "reschedule_notify": ("Notify customer", "#16A34A")}
 
 
+ROLE_BADGES = {"super_admin": ("Super Admin", "rp-super", "#7C3AED"),
+               "branch_admin": ("Branch Admin", "rp-brand", BRAND),
+               "partner": ("Delivery Partner", "rp-low", "#16A34A")}
+LOGO_SMALL = ('<svg width="28" height="28" viewBox="0 0 40 40" aria-hidden="true"><rect width="40" height="40" rx="11" '
+              'fill="#2563EB"/><path d="M7 21c3.5 0 3.5-4 7-4s3.5 4 7 4 3.5-4 7-4 3.5 4 5 4" stroke="#fff" '
+              'stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M7 28c3.5 0 3.5-4 7-4s3.5 4 7 4 '
+              '3.5-4 7-4 3.5 4 5 4" stroke="#BFDBFE" stroke-width="2.6" fill="none" stroke-linecap="round"/></svg>')
+
+
+def setup_store():
+    store.init_db()
+
+
 def setup_page(layout="wide"):
     # auto: the menu is open on laptops and folded away on phones
-    st.set_page_config(page_title="Ripple", page_icon=":material/route:", layout=layout,
+    st.set_page_config(page_title="RIPPLE", page_icon=":material/route:", layout=layout,
                        initial_sidebar_state="auto")
     st.markdown(f"<style>{CSS_PATH.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
-    store.init_db()
 
 
 def is_dark():
@@ -44,11 +56,14 @@ def clock_text():
 
 
 def header(title, subtitle="", live=True):
+    """Page title; branch admins also see their branch name (e.g. 'Coimbatore East – Peelamedu')."""
     live_dot = '<span class="rp-live"></span>' if live else ""
+    branch = st.session_state.get("branch_name") if st.session_state.get("role") == "branch_admin" else None
+    branch_chip = f'<span class="rp-badge rp-brand" style="margin-right:8px">{escape(branch)}</span>' if branch else ""
     st.markdown(
         f'<div class="rp-header"><div><p class="rp-title">{escape(title)}</p>'
         f'{f"<p class=rp-sub>{escape(subtitle)}</p>" if subtitle else ""}</div>'
-        f'<div class="rp-clock">{live_dot}{escape(clock_text())}</div></div>', unsafe_allow_html=True)
+        f'<div class="rp-clock">{branch_chip}{live_dot}{escape(clock_text())}</div></div>', unsafe_allow_html=True)
 
 
 def badge(text, css="rp-neutral"):
@@ -127,32 +142,32 @@ def resume_live_updates():
 
 
 def sidebar_user():
-    """Who is logged in, the clock, Logout – and Reset demo data for managers only."""
-    s = st.session_state
-    with st.sidebar:
-        if s["role"] == "partner":
-            from modules import partner_scope
+    """Logo, who is signed in (role badge, branch), the clock, Logout – Reset demo data for Super Admins only."""
+    user = st.session_state["user"]
+    label, css, colour = ROLE_BADGES[user["role"]]
+    line = user.get("email") or user["user_id"]
+    if user["role"] == "partner":
+        from modules import partner_scope
 
-            profile = partner_scope.get_partner_profile(s["dp_id"])
-            line = f"{s['dp_id']} · {profile['vehicle_type'].title()} {profile['reg_no']}"
-            colour = PARTNER_STATUS.get(profile["status"], ("", "", "#6B7280"))[2]
-            role_badge = badge("Delivery Partner", "rp-low")
-        else:
-            line, colour, role_badge = s["user_id"], BRAND, badge("Manager", "rp-brand")
+        profile = partner_scope.get_partner_profile(user["dp_id"], user["branch_id"])
+        line = f"{user['dp_id']} · {profile['vehicle_type'].title()} {profile['reg_no']}"
+    with st.sidebar:
+        st.markdown(f'<div class="rp-side-logo">{LOGO_SMALL}<span>RIPPLE</span></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="rp-person"><div class="rp-avatar" style="background:{colour}">'
-                    f'{escape(initials(s["display_name"]))}</div><div><b>{escape(s["display_name"])}</b><br>'
-                    f'<small>{escape(line)}</small></div></div><div style="margin:8px 0 2px">{role_badge}</div>',
+                    f'{escape(initials(user["display_name"]))}</div><div><b>{escape(user["display_name"])}</b><br>'
+                    f'<small>{escape(line)}</small></div></div><div style="margin:8px 0 2px">{badge(label, css)}</div>'
+                    + (f'<small style="opacity:.7">{escape(user["branch_name"])}</small>' if user.get("branch_name") else ""),
                     unsafe_allow_html=True)
         st.caption(f":material/schedule: {clock_text()}")
         if st.button("Logout", icon=":material/logout:", width="stretch", key="logout"):
             guards.logout()
-        if s["role"] == "manager":
+        if user["role"] == "super_admin":
             with st.popover("Reset demo data", icon=":material/restart_alt:", width="stretch"):
-                st.write("Back to 09:00 with no issues, all deliveries pending and the demo accounts restored. "
-                         "Everyone using the app sees the reset.")
+                st.write("Back to 09:00 in every branch: no issues, all deliveries pending, demo accounts restored. "
+                         "Everyone using the app sees the reset and is signed out.")
                 if st.button("Reset everything", type="primary", key="reset_demo"):
                     store.reset_demo()
-                    st.rerun()
+                    guards.logout()
 
 
 def live_updates(every="4s"):

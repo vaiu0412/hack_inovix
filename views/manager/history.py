@@ -3,12 +3,12 @@ import streamlit as st
 
 from modules import guards, manager_ui as mui, store, ui
 
-guards.require_role("manager")
+guards.require_role("branch_admin")
 ui.header("History", "Every decision and event since the start of the day.")
 ui.live_updates()
 ctx = mui.context()
 
-closed = store.list_issues(("accepted", "rejected"))
+closed = store.list_issues(("accepted", "rejected"), branch_id=ctx["branch_id"])
 st.markdown(f"##### Decided issues ({len(closed)})")
 if not closed:
     st.caption("Accepted and rejected issues appear here.")
@@ -18,5 +18,5 @@ for issue in closed[:20]:
 
 st.markdown("##### Activity log")
 with st.container(border=True):
-    mui.activity_feed(limit=80)
+    mui.activity_feed(ctx, limit=80)
 mui.ai_status_line()

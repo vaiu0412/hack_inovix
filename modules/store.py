@@ -144,7 +144,8 @@ def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
         ids = {r[0] for r in conn.execute("SELECT partner_id FROM partners")}
-    if not ids or not ids <= set(load_partners()["partner_id"]):  # empty, or old P1-P6 style IDs
+    # empty, or the old P1-P6 partner IDs (partners added later by branch admins, e.g. DP107, are kept)
+    if not ids or any(not str(i).startswith("DP") for i in ids):
         reset_demo()
         return
     with connect() as conn:

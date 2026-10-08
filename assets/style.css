@@ -25,6 +25,10 @@
 .rp-low      { background: rgba(22, 163, 74, .12); color: #16A34A; border-color: rgba(22, 163, 74, .35); }
 .rp-neutral  { background: rgba(128, 128, 128, .12); border-color: rgba(128, 128, 128, .28); }
 .rp-brand    { background: rgba(37, 99, 235, .12); color: #2563EB; border-color: rgba(37, 99, 235, .35); }
+.rp-super    { background: rgba(124, 58, 237, .12); color: #7C3AED; border-color: rgba(124, 58, 237, .35); }
+
+/* ---------- sidebar logo */
+.rp-side-logo { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: .16em; margin: 0 0 14px; }
 
 /* ---------- small key/value grid used in cards */
 .rp-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px 16px; margin: 4px 0 2px; }

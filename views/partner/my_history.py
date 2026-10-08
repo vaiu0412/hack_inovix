@@ -7,11 +7,12 @@ from modules import guards, partner_scope as scope, ui
 
 guards.require_role("partner")
 dp_id = guards.dp_id()
-ui.header("My History", "Your reports, instructions and completed deliveries.")
+branch = guards.branch_id()  # from the validated session only
+ui.header("My History", "Your reports and completed deliveries.")
 ui.live_updates()
 
 st.markdown("##### My reports")
-reports = scope.get_partner_incidents(dp_id)
+reports = scope.get_partner_incidents(dp_id, branch)
 if not reports:
     st.caption("You haven't reported anything today.")
 for r in reports:
@@ -27,15 +28,8 @@ for r in reports:
         else:
             st.caption(f"Sent at {r['created_at']} · operations is reviewing")
 
-st.markdown("##### Instructions received")
-messages = scope.get_partner_notifications(dp_id)
-if not messages:
-    st.caption("No instructions yet.")
-for m in messages:
-    st.markdown(f"<small>{m['created_at']}</small> {escape(m['text'])}", unsafe_allow_html=True)
-
 st.markdown("##### Delivered")
-deliveries = scope.get_partner_deliveries(dp_id)
+deliveries = scope.get_partner_deliveries(dp_id, branch)
 done = deliveries[deliveries["status"] == "delivered"]
 if done.empty:
     st.caption("Nothing delivered yet.")

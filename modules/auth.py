@@ -133,7 +133,7 @@ def create_session(user_id, remember_me=False):
 
 def validate_session(token):
     """The signed-in user for a token, or None (unknown, expired, revoked, deactivated, branch off)."""
-    if not token:
+    if not isinstance(token, str) or not token:
         return None
     with store.connect() as conn:
         session = conn.execute("SELECT * FROM sessions WHERE token_hash = ?", (_sha(token),)).fetchone()

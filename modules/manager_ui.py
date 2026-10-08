@@ -1,11 +1,12 @@
-"""Building blocks shared by the manager pages (moved from the single Operations page)."""
+"""Building blocks shared by the Branch Admin pages. Everything is scoped to the signed-in
+admin's branch: ctx["branch_id"] comes from the validated session only."""
 from html import escape
 
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-from modules import guards, issues, live_map, operations, store, ui
+from modules import admin, guards, issues, live_map, operations, store, ui
 from modules.data_loader import load_all
 from modules.graph_viz import build_graph, render_graph
 from modules.parser import SEVERITIES, llm_status
@@ -13,18 +14,20 @@ from modules.report_ui import report_form
 
 
 def context():
-    """Data every manager page needs, read once per run."""
+    """Data every branch admin page needs, read once per run – own branch only."""
+    branch = guards.branch_id()
     roads = load_all()["roads"]
-    partners = store.partners_df()
+    partners = store.partners_df(branch)
     return {
         "roads": roads, "road_names": dict(zip(roads["road_id"], roads["name"])), "partners": partners,
         "partner_names": dict(zip(partners["partner_id"], partners["name"])),
-        "open_issues": store.list_issues(store.OPEN_ISSUE_STATUSES),
+        "open_issues": store.list_issues(store.OPEN_ISSUE_STATUSES, branch_id=branch),
+        "branch_id": branch, "actor": guards.current_user(),
     }
 
 
 def go(page_key):
-    st.switch_page(guards.MANAGER_PAGES[page_key])
+    st.switch_page(guards.BRANCH_PAGES[page_key])
 
 
 def risk_labels_now(open_issues):
@@ -36,8 +39,8 @@ def risk_labels_now(open_issues):
     return labels
 
 
-def kpi_tiles():
-    kpi = operations.kpis()
+def kpi_tiles(ctx):
+    kpi = operations.kpis(ctx["branch_id"])
     ui.kpi_row([
         ("Partners on duty", f"{kpi['on_duty']} / {kpi['partners']}", None),
         ("Deliveries today", kpi["deliveries"], f"{kpi['delivered']} delivered"),
@@ -79,10 +82,12 @@ def ai_status_line():
 def live_map_view(ctx, height=500, key="live_map"):
     partners, open_issues = ctx["partners"], ctx["open_issues"]
     plans = [i["plan"] for i in open_issues if i.get("plan")]
-    disruptions = store.active_disruptions() + [p["disruption"] for p in plans if p.get("disruption")]
+    branch = ctx["branch_id"]
+    disruptions = store.active_disruptions(branch) + [p["disruption"] for p in plans if p.get("disruption")]
     detours = {r for p in plans for r in p.get("via_roads", [])}
-    detours |= {r for i in store.list_issues(("accepted",)) for r in (i.get("plan") or {}).get("via_roads", [])}
-    fmap = live_map.build(partners, store.deliveries_df(), ctx["roads"], disruptions, detours,
+    detours |= {r for i in store.list_issues(("accepted",), branch_id=branch)
+                for r in (i.get("plan") or {}).get("via_roads", [])}
+    fmap = live_map.build(partners, store.deliveries_df(branch_id=branch), ctx["roads"], disruptions, detours,
                           risk_labels_now(open_issues), selected=st.session_state.get("selected_partner"),
                           dark=ui.is_dark())
     out = st_folium(fmap, height=height, use_container_width=True, key=key,
@@ -112,7 +117,7 @@ def partner_picker(ctx):
 
 
 def partner_panel(ctx, pid):
-    p = store.get_partner(pid) if pid else None
+    p = store.get_partner(pid, ctx["branch_id"]) if pid else None
     if p is None:
         st.info("Tap a delivery partner on the map or in the table.", icon=":material/touch_app:")
         return
@@ -128,7 +133,7 @@ def partner_panel(ctx, pid):
             ("Rating", f"{p['rating']:.1f} / 5"),
         ]), unsafe_allow_html=True)
         st.caption(f"Next stop: {p['next_stop']} · ETA {p['next_eta']} · speaks {p['languages']}")
-        stops = store.deliveries_df(p["vehicle_id"])
+        stops = store.deliveries_df(p["vehicle_id"], branch_id=ctx["branch_id"])
         if len(stops):
             view = stops[["stop_order", "customer", "address_area", "priority", "planned_eta", "deadline", "status"]]
             st.dataframe(view.rename(columns={"stop_order": "#", "customer": "Customer", "address_area": "Area",
@@ -141,6 +146,12 @@ def partner_panel(ctx, pid):
         if mine and st.button(f"Review issue #{mine[0]['issue_id']}", key=f"review_{pid}",
                               icon=":material/report:", width="stretch"):
             go("disruptions")
+        active = st.toggle("Account active", value=bool(p["account_active"]), key=f"partner_active_{pid}",
+                           help="A deactivated delivery partner is signed out and cannot sign in.")
+        if active != bool(p["account_active"]):
+            admin.set_partner_active(ctx["actor"], pid, active)
+            st.toast(f"{p['name']} {'activated' if active else 'deactivated'}")
+            st.rerun()
 
 
 def team_table(ctx):
@@ -189,7 +200,7 @@ def log_issue_dialog(ctx):
     reporter = st.selectbox("Reported by", ["OPS"] + ctx["partners"]["partner_id"].tolist(),
                             format_func=lambda pid: "Operations desk" if pid == "OPS"
                             else f"{ctx['partner_names'][pid]} · {pid}")
-    issue_id = report_form(reporter, prefix=f"mgr_{reporter}", source="manager")
+    issue_id = report_form(reporter, ctx["branch_id"], prefix=f"mgr_{reporter}", source="manager")
     if issue_id:
         st.rerun()
 
@@ -209,8 +220,8 @@ def correct_issue(ctx, issue):
         severity = c3.selectbox("Severity", SEVERITIES, index=SEVERITIES.index(problem.get("severity", "medium")))
         minutes = c4.number_input("Duration (min)", 0, 600, int(problem.get("duration_min") or 0), step=15)
         if st.form_submit_button("Save and re-plan", type="primary", width="stretch"):
-            operations.edit_problem(issue["issue_id"], type=dtype, road_id=road, severity=severity,
-                                    duration_min=int(minutes))
+            operations.edit_problem(issue["issue_id"], branch_id=ctx["branch_id"], type=dtype, road_id=road,
+                                    severity=severity, duration_min=int(minutes))
             st.rerun()
 
 
@@ -278,14 +289,15 @@ def issue_card(ctx, issue, compact=False):
                     if accept_col.button("Accept plan", type="primary", key=f"accept_{issue['issue_id']}",
                                          icon=":material/check_circle:", width="stretch"):
                         st.toast(operations.accept(issue["issue_id"], decided_by=st.session_state.get(
-                            "display_name", "Manager")), icon=":material/check_circle:")
+                            "display_name", "Branch admin"), branch_id=ctx["branch_id"]), icon=":material/check_circle:")
                         st.rerun()
                     with reject_col.popover("Reject", width="stretch"):
                         reason = st.text_input("Why?", key=f"why_{issue['issue_id']}",
                                                placeholder="e.g. Road already clear")
                         if st.button("Reject issue", key=f"reject_{issue['issue_id']}", width="stretch"):
                             operations.reject(issue["issue_id"], reason or "Not needed",
-                                              st.session_state.get("display_name", "Manager"))
+                                              st.session_state.get("display_name", "Branch admin"),
+                                              branch_id=ctx["branch_id"])
                             st.rerun()
                 elif issue.get("decision_note"):
                     st.caption(f"{issue['decision_note']} at {issue.get('decided_at', '')}")
@@ -302,12 +314,13 @@ def issue_card(ctx, issue, compact=False):
                              .style.map(lambda v: f"color: {ui.RISK_HEX.get(v, 'inherit')}; font-weight: 600",
                                         subset=["Risk"]),
                              hide_index=True, width="stretch")
-                small_map = live_map.build(ctx["partners"], store.deliveries_df(), ctx["roads"], [plan["disruption"]],
+                small_map = live_map.build(ctx["partners"], store.deliveries_df(branch_id=ctx["branch_id"]),
+                                           ctx["roads"], [plan["disruption"]],
                                            plan.get("via_roads", []),
                                            dict(zip(risk["delivery_id"], risk["risk_label"])), dark=ui.is_dark())
                 st_folium(small_map, height=360, use_container_width=True, key=f"issue_map_{issue['issue_id']}",
                           returned_objects=[])
-                st.plotly_chart(render_graph(build_graph(plan["disruption"], risk, store.snapshot())),
+                st.plotly_chart(render_graph(build_graph(plan["disruption"], risk, store.snapshot(ctx["branch_id"]))),
                                 width="stretch")
         if plan.get("actions") and not compact:
             with st.expander("Messages that will be sent" if issue["status"] == "analysed" else "Messages sent"):
@@ -317,8 +330,8 @@ def issue_card(ctx, issue, compact=False):
                         st.code(message["text"], language=None, wrap_lines=True)
 
 
-def activity_feed(limit=60):
+def activity_feed(ctx, limit=60):
     icons = {"issue": ":material/report:", "ai": ":material/psychology:", "decision": ":material/gavel:",
              "delivery": ":material/package_2:", "edit": ":material/edit:", "system": ":material/settings:"}
-    for event in store.events(limit).to_dict("records"):
+    for event in store.events(limit, branch_id=ctx["branch_id"]).to_dict("records"):
         st.markdown(f"{icons.get(event['kind'], ':material/info:')} `{event['created_at']}` {event['text']}")

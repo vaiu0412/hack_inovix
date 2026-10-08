@@ -110,3 +110,24 @@ def test_default_database_is_an_absolute_project_path(monkeypatch):
     monkeypatch.delenv("RIPPLE_DB", raising=False)
     monkeypatch.delenv("DEPORT_DB", raising=False)
     assert store.DEFAULT_DB.is_absolute() and store.DEFAULT_DB == ROOT / "data" / "deport.db"
+
+
+def test_prototype_database_is_backed_up_and_gets_accounts(db):
+    """The first prototype stored partners P1-P6 and had no accounts; the live site kept that file."""
+    with sqlite3.connect(db) as conn:
+        conn.execute("DELETE FROM users")
+        conn.execute("UPDATE partners SET partner_id = 'P' || substr(partner_id, 5)")
+    store.init_db()
+    assert auth.authenticate("superadmin@deport.in", "Super@123", "super")[0]["user_id"] == "superadmin"
+    assert auth.authenticate("DP102", "Partner@123")[0]["dp_id"] == "DP102"
+    assert any(p.name.endswith("before-reset.db") for p in store.files_dir("backups").iterdir())
+
+
+def test_data_without_accounts_gets_demo_accounts_and_keeps_data(db):
+    store.update_delivery("D01", status="delivered")
+    with sqlite3.connect(db) as conn:
+        conn.execute("DELETE FROM users")
+    store.init_db()
+    assert auth.authenticate("east.admin@deport.in", "Admin@123")[0]["branch_id"] == "CBE-E"
+    assert store.deliveries_df().set_index("delivery_id").loc["D01", "status"] == "delivered"   # data kept
+    assert resets() == 1

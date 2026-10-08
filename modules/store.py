@@ -231,11 +231,15 @@ def init_db():
     with connect() as conn:
         conn.execute("PRAGMA journal_mode = WAL")  # readers never block the writer; stored in the file
         conn.executescript(SCHEMA)
-        empty = (conn.execute("SELECT COUNT(*) FROM partners").fetchone()[0] == 0
-                 and conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0) if "role_id" in _columns(
-            conn, "users") else conn.execute("SELECT COUNT(*) FROM partners").fetchone()[0] == 0
-    if empty:
+        partner_ids = [r[0] for r in conn.execute("SELECT partner_id FROM partners")]
+        accounts = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if not partner_ids and not accounts:
         reset_demo(backup=False)  # first run: nothing to keep
+        return
+    if any(not str(pid).startswith("DP") for pid in partner_ids):
+        # the first prototype's database (partners P1-P6, no branches, no accounts) can't be upgraded:
+        # keep a copy in data/backups/, then start from the demo – otherwise nobody could sign in
+        reset_demo(backup=True)
         return
     with connect() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
@@ -248,6 +252,11 @@ def init_db():
             _migrate_v5(conn)
         if current < 6:
             _migrate_v6(conn)
+        if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:  # data but no accounts: add the demo ones
+            _seed_users(conn)
+            conn.execute("INSERT INTO audit_log(time, actor_user_id, action, target, details_json) VALUES (?,?,?,?,?)",
+                         (now_iso(), "system", "seed_accounts", "demo accounts", "{}"))
+            _bump(conn)
         stamp = conn.execute("SELECT value FROM meta WHERE key = 'geometry_stamp'").fetchone()
         if not stamp or stamp["value"] != geometry.cache_stamp():  # the shapes file changed: reload it
             _seed_geometry(conn)

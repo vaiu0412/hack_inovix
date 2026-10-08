@@ -183,6 +183,9 @@ def parse_rules(text, data):
 LLM_COOLDOWN_SEC = 300  # after a failure, skip the LLM for 5 minutes
 # Groq chat models open to normal (free/developer) keys, best first. Override with GROQ_MODEL.
 GROQ_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "llama-3.1-8b-instant"]
+# Groq's firewall (Cloudflare) blocks Python's default "Python-urllib" identity with
+# HTTP 403 "error code: 1010", so every AI request names the app instead.
+USER_AGENT = "Ripple/2.0 (+https://github.com/vaiu0412/hack_inovix)"
 # last outcome of an AI call, shown on the Activity page (never contains the key)
 LLM_STATUS = {"provider": None, "model": None, "ok_at": None, "error": None, "error_at": None}
 _llm_paused_until = 0.0
@@ -254,10 +257,14 @@ def json_from_text(text):
 def _http_error_text(error):
     """Groq/Gemini error message without anything sensitive."""
     try:
-        detail = json.loads(error.read().decode()).get("error", {})
+        raw = error.read().decode(errors="replace")
+    except Exception:
+        raw = ""
+    try:
+        detail = json.loads(raw).get("error", {})
         message = detail.get("message") if isinstance(detail, dict) else str(detail)
     except Exception:
-        message = error.reason
+        message = f"{error.reason} ({raw.strip()[:80]})" if raw.strip() else error.reason
     return f"HTTP {error.code}: {message}"
 
 
@@ -307,6 +314,7 @@ def _call_provider(prompt, want_json, timeout):
 
 
 def _post_json(url, body, headers, timeout):
+    headers = {"User-Agent": USER_AGENT, **headers}
     request = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode())

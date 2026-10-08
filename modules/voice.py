@@ -11,7 +11,7 @@ import json
 import urllib.request
 import uuid
 
-from modules.parser import offline, setting
+from modules.parser import USER_AGENT, offline, setting
 
 # Helps Whisper spell local names correctly.
 WHISPER_HINT = ("Delivery driver in Coimbatore reporting a problem, Tamil and English mixed. "
@@ -58,7 +58,8 @@ def _groq(audio_bytes, filename, mime):
               "temperature": "0", "prompt": WHISPER_HINT}
     body, content_type = _multipart(fields, "file", filename, mime, audio_bytes)
     request = urllib.request.Request("https://api.groq.com/openai/v1/audio/transcriptions", data=body,
-                                     headers={"Authorization": f"Bearer {key}", "Content-Type": content_type},
+                                     headers={"Authorization": f"Bearer {key}", "Content-Type": content_type,
+                                              "User-Agent": USER_AGENT},
                                      method="POST")
     with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as response:
         return json.loads(response.read().decode())["text"]
@@ -76,7 +77,8 @@ def _gemini(audio_bytes, filename, mime):
     ]}]}
     request = urllib.request.Request(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "x-goog-api-key": key},
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json", "x-goog-api-key": key, "User-Agent": USER_AGENT},
         method="POST")
     with urllib.request.urlopen(request, timeout=TIMEOUT_SEC) as response:
         reply = json.loads(response.read().decode())

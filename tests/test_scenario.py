@@ -80,6 +80,52 @@ def test_road_with_no_deliveries_has_no_impact(data):
     assert impact.empty and "no impact" in summary["message"].lower()
 
 
+# ---------------------------------------------------------------- several disruptions at once
+RAIN_TEXT = "Heavy rain flooding at Trichy Road, expect 45 mins delay"
+
+
+@pytest.fixture(scope="module")
+def two(data, demo):
+    disruptions = [demo["disruption"], parse_disruption(RAIN_TEXT, data, use_llm=False)]
+    impact, summary = compute_impact(disruptions, data)
+    risk = score_risk(impact, disruptions)
+    actions, before_after, after = recommend(risk, disruptions, data, polish=False)
+    return {"summary": summary, "risk": risk, "actions": actions, "before_after": before_after}
+
+
+def test_two_disruptions_widen_the_ripple(demo, two):
+    assert set(demo["summary"]["affected_vehicles"]) < set(two["summary"]["affected_vehicles"])
+    assert two["summary"]["affected_deliveries"] > demo["summary"]["affected_deliveries"]
+    assert two["summary"]["affected_roads"] == ["Avinashi Road", "Trichy Road"]
+
+
+def test_delivery_hit_twice_adds_both_delays(two):
+    double = two["risk"][two["risk"]["disruption_ids"].apply(len) == 2]
+    assert not double.empty
+    for _, row in double.iterrows():
+        assert row["delay_min"] == sum(p["delay_min"] for p in row["parts"])
+        assert "hit by 2 disruptions" in row["reason"]
+
+
+def test_reroutes_avoid_every_blocked_road(two):
+    reroutes = [a for a in two["actions"] if a["action_type"] == "reroute"]
+    assert reroutes
+    for action in reroutes:
+        assert not set(action["via_roads"]) & {"R1", "R2"}
+
+
+def test_plan_helps_with_two_disruptions(two):
+    ba = two["before_after"]
+    assert ba["misses_after"] < ba["misses_before"]
+    assert ba["critical_after"] < ba["critical_before"]
+
+
+def test_single_dict_and_one_item_list_agree(data, demo):
+    as_list_impact, _ = compute_impact([demo["disruption"]], data)
+    as_dict_impact, _ = compute_impact(demo["disruption"], data)
+    assert as_list_impact["delay_min"].tolist() == as_dict_impact["delay_min"].tolist()
+
+
 # ---------------------------------------------------------------- parser
 PARSER_CASES = [
     ("Accident near Avinashi Road, road blocked for 2 hours", "accident", "R1", None, 120),

@@ -1,4 +1,4 @@
-"""WHAT IS AFFECTED? Find the deliveries hit by a disruption and their new ETAs.
+"""WHAT IS AFFECTED? Find the deliveries hit by one or more disruptions and their new ETAs.
 
 Rules:
 - Road disruption: every vehicle whose route uses the road is affected.
@@ -7,6 +7,7 @@ Rules:
 - Vehicle breakdown: all remaining deliveries of that vehicle are affected.
 - delay = min(duration, detour penalty for the severity) x severity factor
           + a small extra per later stop (cascade).
+- Several disruptions at once: a delivery hit by more than one adds up the delays.
 """
 import pandas as pd
 
@@ -20,8 +21,16 @@ IMPACT_COLUMNS = [
     "delivery_id", "customer", "address_area", "priority", "vehicle_id", "road_id", "road_name",
     "stop_order", "cascade_index", "on_blocked_road", "planned_eta", "deadline", "delay_min",
     "new_eta", "slack_min", "will_miss", "eta_min", "deadline_min", "new_eta_min", "lat", "lng",
-    "customer_phone",
+    "customer_phone", "severity", "disruption_ids", "parts", "cause_type", "cause_road_id",
 ]
+SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+
+def as_list(disruptions):
+    """Accept a single disruption dict, a list of them, or None."""
+    if not disruptions:
+        return []
+    return [disruptions] if isinstance(disruptions, dict) else list(disruptions)
 
 
 def base_delay(disruption):
@@ -63,47 +72,80 @@ def find_affected(disruption, data):
     return rows
 
 
-def compute_impact(disruption, data):
-    """Return (impact DataFrame, summary dict)."""
+def compute_impact(disruptions, data):
+    """Return (impact DataFrame, summary dict) for one disruption or a list of them.
+
+    Each row keeps "parts": one entry per disruption that hits the delivery,
+    so the recommender knows which delay comes from where.
+    """
+    disruptions = as_list(disruptions)
     road_names = data["roads"].set_index("road_id")["name"]
-    delay0 = base_delay(disruption)
+
+    hits = {}  # delivery_id -> (delivery row, [parts])
+    for i, disruption in enumerate(disruptions):
+        delay0 = base_delay(disruption)
+        for d, k, on_blocked in find_affected(disruption, data):
+            _, parts = hits.setdefault(d["delivery_id"], (d, []))
+            parts.append({
+                "disruption_id": i,
+                "type": disruption.get("type"),
+                "road_id": disruption.get("road_id"),
+                "vehicle_id": disruption.get("vehicle_id"),
+                "severity": disruption.get("severity", "medium"),
+                "cascade_index": k,
+                "on_blocked_road": bool(on_blocked),
+                "delay_min": delay0 + k * CASCADE_STEP_MIN,
+            })
+
     records = []
-    for d, k, on_blocked in find_affected(disruption, data):
-        delay = delay0 + k * CASCADE_STEP_MIN
+    for d, parts in hits.values():
+        delay = sum(p["delay_min"] for p in parts)
+        main = max(parts, key=lambda p: p["delay_min"])  # the disruption that hurts most
         new_eta = int(d["eta_min"] + delay)
         records.append({
             **{c: d[c] for c in ["delivery_id", "customer", "address_area", "priority", "vehicle_id",
                                  "road_id", "stop_order", "planned_eta", "deadline", "eta_min",
                                  "deadline_min", "lat", "lng", "customer_phone"]},
             "road_name": road_names.get(d["road_id"], d["road_id"]),
-            "cascade_index": k,
-            "on_blocked_road": bool(on_blocked),
+            "cascade_index": min(p["cascade_index"] for p in parts),
+            "on_blocked_road": any(p["on_blocked_road"] for p in parts),
             "delay_min": delay,
             "new_eta_min": new_eta,
             "new_eta": min_to_hhmm(new_eta),
             "slack_min": int(d["deadline_min"] - new_eta),
             "will_miss": bool(d["deadline_min"] - new_eta < 0),
+            "severity": max((p["severity"] for p in parts), key=lambda s: SEVERITY_RANK.get(s, 1)),
+            "disruption_ids": [p["disruption_id"] for p in parts],
+            "parts": parts,
+            "cause_type": main["type"],
+            "cause_road_id": main["road_id"],
         })
     impact = pd.DataFrame(records, columns=IMPACT_COLUMNS)
+    if not impact.empty:
+        impact = impact.sort_values(["vehicle_id", "stop_order"]).reset_index(drop=True)
 
+    roads = [d["road_id"] for d in disruptions if d.get("road_id")]
     summary = {
-        "affected_roads": [],
+        "affected_roads": [road_names.get(r) for r in dict.fromkeys(roads)],
         "affected_vehicles": sorted(impact["vehicle_id"].unique().tolist()),
         "affected_deliveries": int(len(impact)),
         "total_delay_min": int(impact["delay_min"].sum()) if len(impact) else 0,
         "predicted_misses": int(impact["will_miss"].sum()) if len(impact) else 0,
-        "base_delay_min": delay0,
+        "base_delay_min": max((base_delay(d) for d in disruptions), default=0),
+        "disruption_count": len(disruptions),
         "message": "",
     }
-    if disruption.get("road_id"):
-        summary["affected_roads"] = [road_names.get(disruption["road_id"])]
     if impact.empty:
-        if disruption.get("type") == "requirement_change":
+        if not disruptions:
+            summary["message"] = "No disruption reported yet."
+        elif all(d.get("type") == "requirement_change" for d in disruptions):
             summary["message"] = "Requirement change only: no road or vehicle is blocked, so no ripple."
-        elif not disruption.get("road_id") and not disruption.get("vehicle_id"):
+        elif all(not d.get("road_id") and not d.get("vehicle_id") for d in disruptions):
             summary["message"] = "Couldn't match a known road or vehicle. Please pick the road manually."
-        else:
+        elif len(disruptions) == 1:
             summary["message"] = "No impact: no planned delivery uses this road after now."
+        else:
+            summary["message"] = "No impact: no planned delivery uses these roads after now."
     return impact, summary
 
 
@@ -124,4 +166,12 @@ if __name__ == "__main__":
     print("Breakdown:", compute_impact(breakdown, data)[1])
     unknown = parse_disruption("Something happened somewhere", data, use_llm=False)
     print("Unknown:", compute_impact(unknown, data)[1]["message"])
+
+    rain = parse_disruption("Heavy rain flooding at Trichy Road, expect 45 mins delay", data, use_llm=False)
+    both, both_summary = compute_impact([demo, rain], data)
+    print("Accident + rain:", {k: both_summary[k] for k in ["affected_vehicles", "affected_deliveries",
+                                                             "total_delay_min", "predicted_misses"]})
+    double = both[both["disruption_ids"].apply(len) > 1]
+    print("Hit by both:", double[["delivery_id", "delay_min", "severity"]].to_string(index=False))
+    assert (double["delay_min"] == double["parts"].apply(lambda ps: sum(p["delay_min"] for p in ps))).all()
     print("impact OK")

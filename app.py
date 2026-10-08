@@ -13,7 +13,7 @@ from modules.graph_viz import build_graph, render_graph
 from modules.impact import compute_impact
 from modules.map_viz import build_map
 from modules.parser import BASE_SEVERITY, SEVERITIES, llm_available, parse_disruption
-from modules.recommender import find_alternate_road, recommend
+from modules.recommender import recommend
 from modules.risk import LABEL_COLORS, score_risk
 
 st.set_page_config(layout="wide", page_title="Ripple", page_icon="🌊")
@@ -35,8 +35,8 @@ vehicle_ids = data["vehicles"]["vehicle_id"].tolist()
 # ---------------------------------------------------------------- state
 def init_state():
     defaults = {"page": "Dashboard", "report_text": "", "parsed": None, "parse_version": 0,
-                "disruption": None, "impact": None, "summary": None, "actions": [],
-                "before_after": None, "after": None, "alt_road_id": None, "applied": False}
+                "disruptions": [], "impact": None, "summary": None, "actions": [],
+                "before_after": None, "after": None, "alt_road_ids": [], "applied": False}
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
@@ -58,17 +58,44 @@ def go_to(page):
     st.session_state.page = page
 
 
-def run_pipeline(disruption):
-    """WHAT IS AFFECTED + WHAT NEXT, stored in session_state."""
-    impact, summary = compute_impact(disruption, data)
-    risk = score_risk(impact, disruption)
-    actions, before_after, after = recommend(risk, disruption, data)
-    alt = None
-    if any(a["action_type"] == "reroute" for a in actions):
-        alt_road, _ = find_alternate_road(disruption.get("road_id"), data)
-        alt = None if alt_road is None else alt_road["road_id"]
-    st.session_state.update(disruption=disruption, impact=risk, summary=summary, actions=actions,
-                            before_after=before_after, after=after, alt_road_id=alt, applied=False)
+def run_pipeline():
+    """WHAT IS AFFECTED + WHAT NEXT for all active disruptions, stored in session_state."""
+    disruptions = st.session_state.disruptions
+    if not disruptions:
+        st.session_state.update(impact=None, summary=None, actions=[], before_after=None, after=None,
+                                alt_road_ids=[], applied=False)
+        return
+    impact, summary = compute_impact(disruptions, data)
+    risk = score_risk(impact, disruptions)
+    actions, before_after, after = recommend(risk, disruptions, data)
+    alt_ids = list(dict.fromkeys(r for a in actions for r in a.get("via_roads", [])))
+    st.session_state.update(impact=risk, summary=summary, actions=actions, before_after=before_after,
+                            after=after, alt_road_ids=alt_ids, applied=False)
+
+
+def same_disruption(a, b):
+    return all(a.get(k) == b.get(k) for k in ("type", "road_id", "vehicle_id"))
+
+
+def add_disruption(disruption):
+    """Add a confirmed disruption. Confirming the same type + road + vehicle again updates it."""
+    others = [d for d in st.session_state.disruptions if not same_disruption(d, disruption)]
+    st.session_state.disruptions = others + [disruption]
+    run_pipeline()
+
+
+def remove_disruption(index):
+    st.session_state.disruptions = [d for i, d in enumerate(st.session_state.disruptions) if i != index]
+    run_pipeline()
+
+
+def describe(disruption):
+    """'Accident · Avinashi Road' or 'Breakdown · V1 near Race Course Road'."""
+    kind = disruption["type"].replace("_", " ").title()
+    where = road_names.get(disruption.get("road_id"), "")
+    if disruption.get("type") == "breakdown" and disruption.get("vehicle_id"):
+        where = disruption["vehicle_id"] + (f" near {where}" if where else "")
+    return f"{kind} · {where or '—'}"
 
 
 def current_deliveries():
@@ -158,11 +185,14 @@ with st.sidebar:
     st.button("▶ Load demo scenario", on_click=load_demo, type="primary")
     st.button("↺ Reset", on_click=reset_all)
     st.divider()
-    if st.session_state.disruption:
-        d = st.session_state.disruption
-        st.markdown(f"**Active disruption**  \n{d['type'].replace('_', ' ').title()} · "
-                    f"{d.get('road_name') or d.get('vehicle_id') or '—'}  \n"
-                    f"{d['severity']} · {d['duration_min']} min")
+    if st.session_state.disruptions:
+        st.markdown(f"**Active disruptions ({len(st.session_state.disruptions)})**")
+        for i, d in enumerate(st.session_state.disruptions):
+            text_col, button_col = st.columns([5, 1], vertical_alignment="center")
+            text_col.markdown(f"{describe(d)}  \n<small>{d['severity']} · {d['duration_min']} min</small>",
+                              unsafe_allow_html=True)
+            button_col.button("✕", key=f"remove_{i}", on_click=remove_disruption, args=(i,),
+                              help="Remove this disruption")
         if st.session_state.applied:
             st.success("Recovery plan applied")
     st.caption("🤖 LLM: " + ("connected" if llm_available() else "off — rule-based mode (works offline)"))
@@ -180,7 +210,7 @@ if page == "Dashboard":
         at_risk = int(risk["risk_label"].isin(["Critical", "High"]).sum())
         critical = int((risk["risk_label"] == "Critical").sum())
     active = data["vehicles"]["status"].eq("active").sum()
-    n_disruptions = 1 if st.session_state.disruption else 0
+    n_disruptions = len(st.session_state.disruptions)
     st.markdown('<div class="kpi-grid">' + "".join([
         kpi("Total vehicles", len(data["vehicles"]), f"{active} active · {len(data['vehicles']) - active} backup"),
         kpi("Total deliveries", len(deliveries), "planned for today"),
@@ -191,8 +221,8 @@ if page == "Dashboard":
     ]) + "</div>", unsafe_allow_html=True)
 
     st.subheader("Live map")
-    st.plotly_chart(build_map(data, st.session_state.disruption, risk,
-                              st.session_state.alt_road_id if st.session_state.applied else None, deliveries),
+    st.plotly_chart(build_map(data, st.session_state.disruptions, risk,
+                              st.session_state.alt_road_ids if st.session_state.applied else None, deliveries),
                     width="stretch", config={"scrollZoom": True})
 
     st.subheader("Deliveries")
@@ -220,6 +250,10 @@ elif page == "Report Disruption":
                 st.warning("Type a message first, or use the form on the right.")
         st.caption("Try: *Murugan vandi breakdown aachu near Race Course* · *Heavy rain flooding at Trichy Road, "
                    "45 mins* · *Protest at Town Hall for 1.5 hr*")
+        if st.session_state.disruptions:
+            n = len(st.session_state.disruptions)
+            st.info(f"{n} disruption{'s are' if n > 1 else ' is'} already active. Confirming adds this one, "
+                    "and Ripple combines their impact. Re-confirming the same type and road updates it.")
     with right:
         st.markdown("**…or fill the form**")
         with st.container(border=True):
@@ -273,7 +307,7 @@ elif page == "Report Disruption":
                 confirmed = {**parsed, "type": e_type, "road_id": None if e_road == "—" else e_road,
                              "road_name": road_names.get(e_road), "severity": e_sev, "duration_min": int(e_dur),
                              "vehicle_id": None if e_veh == "—" else e_veh}
-                run_pipeline(confirmed)
+                add_disruption(confirmed)
                 st.session_state.goto = "Impact"
                 st.rerun()
 
@@ -281,17 +315,23 @@ elif page == "Report Disruption":
 # ---------------------------------------------------------------- 3. Impact
 elif page == "Impact":
     st.subheader("② What is affected?")
-    if st.session_state.disruption is None:
+    if not st.session_state.disruptions:
         need_disruption()
     else:
         summary, risk = st.session_state.summary, st.session_state.impact
+        st.markdown(" ".join(f"<span class='badge neutral'>⚠️ {describe(d)}</span>"
+                             for d in st.session_state.disruptions), unsafe_allow_html=True)
         if risk.empty:
             st.success(f"✅ {summary['message']}")
         else:
             c = st.columns(5)
-            c[0].metric("Affected roads", ", ".join(summary["affected_roads"]) or "—")
+            roads = summary["affected_roads"]
+            if len(roads) > 1:
+                c[0].metric("Affected roads", len(roads), ", ".join(roads), delta_color="off", delta_arrow="off")
+            else:
+                c[0].metric("Affected roads", ", ".join(roads) or "—")
             c[1].metric("Vehicles hit", len(summary["affected_vehicles"]), ", ".join(summary["affected_vehicles"]),
-                        delta_color="off")
+                        delta_color="off", delta_arrow="off")
             c[2].metric("Deliveries hit", summary["affected_deliveries"])
             c[3].metric("Total delay", f"{summary['total_delay_min']} min")
             c[4].metric("Predicted missed deadlines", summary["predicted_misses"])
@@ -303,17 +343,17 @@ elif page == "Impact":
 
             tab_map, tab_graph = st.tabs(["🗺️ Ripple map", "🕸️ Dependency graph"])
             with tab_map:
-                st.plotly_chart(build_map(data, st.session_state.disruption, risk), width="stretch",
+                st.plotly_chart(build_map(data, st.session_state.disruptions, risk), width="stretch",
                                 config={"scrollZoom": True})
             with tab_graph:
-                st.plotly_chart(render_graph(build_graph(st.session_state.disruption, risk, data)), width="stretch")
+                st.plotly_chart(render_graph(build_graph(st.session_state.disruptions, risk, data)), width="stretch")
             st.button("③ See recovery plan →", on_click=go_to, args=("Recovery",), type="primary")
 
 
 # ---------------------------------------------------------------- 4. Recovery
 elif page == "Recovery":
     st.subheader("③ What should we do next?")
-    if st.session_state.disruption is None:
+    if not st.session_state.disruptions:
         need_disruption()
     elif not st.session_state.actions:
         st.success("✅ Nothing to recover: " + (st.session_state.summary or {}).get("message", "no impact."))

@@ -7,6 +7,8 @@ risk = 45 x deadline pressure   (biggest: little or negative slack)
 """
 import pandas as pd
 
+from modules.impact import SEVERITY_RANK, as_list
+
 WEIGHTS = {"slack": 45, "priority": 30, "cascade": 10, "severity": 15}
 PRIORITY_WEIGHT = {"medical": 1.0, "perishable": 0.8, "express": 0.5, "standard": 0.1}
 SEVERITY_WEIGHT = {"low": 0.25, "medium": 0.5, "high": 0.75, "critical": 1.0}
@@ -51,16 +53,27 @@ def make_reason(row):
         parts.append("on the blocked road")
     else:
         parts.append(f"{_ordinal(row['cascade_index'] + 1)} stop downstream")
+    hits = len(row["disruption_ids"]) if isinstance(row.get("disruption_ids"), list) else 1
+    if hits > 1:
+        parts.append(f"hit by {hits} disruptions")
     return " · ".join(parts)
 
 
-def score_risk(impact, disruption):
-    """Add risk_score, risk_label and reason columns; return sorted by risk."""
+def score_risk(impact, disruptions):
+    """Add risk_score, risk_label and reason columns; return sorted by risk.
+
+    Uses each row's own "severity" (worst disruption hitting it) when present.
+    """
     if impact.empty:
         return impact.assign(risk_score=pd.Series(dtype=float), risk_label=pd.Series(dtype=str),
                              reason=pd.Series(dtype=str))
     df = impact.copy()
-    severity = SEVERITY_WEIGHT.get(disruption.get("severity", "medium"), 0.5)
+    if "severity" in df.columns:
+        severity = df["severity"].map(SEVERITY_WEIGHT).fillna(0.5)
+    else:
+        worst = max((d.get("severity", "medium") for d in as_list(disruptions)),
+                    key=lambda s: SEVERITY_RANK.get(s, 1), default="medium")
+        severity = SEVERITY_WEIGHT.get(worst, 0.5)
     # parcels moved to another vehicle are no longer exposed to the disruption
     exposed = ~df["off_route"] if "off_route" in df.columns else True
     df["risk_score"] = (

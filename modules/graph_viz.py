@@ -6,6 +6,7 @@ Nodes are coloured by risk (Critical red ... Low green).
 import networkx as nx
 import plotly.graph_objects as go
 
+from modules.impact import as_list
 from modules.risk import LABEL_COLORS, LABEL_ORDER
 
 LAYER_TITLES = ["Disruption", "Road", "Vehicle", "Delivery", "Customer · deadline"]
@@ -17,25 +18,39 @@ def _worst(labels):
     return min(labels, key=LABEL_ORDER.index) if labels else "Low"
 
 
-def build_graph(disruption, risk_df, data):
-    """Return a DiGraph with layer, label, color and hover attributes on each node."""
+def build_graph(disruptions, risk_df, data):
+    """Return a DiGraph with layer, label, color and hover attributes on each node.
+
+    Works for one disruption or a list; vehicles hang off every disruption that hits them.
+    """
     g = nx.DiGraph()
+    disruptions = as_list(disruptions)
     if risk_df is None or risk_df.empty:
         return g
     road_names = data["roads"].set_index("road_id")["name"]
     vehicles = data["vehicles"].set_index("vehicle_id")
+    has_ids = "disruption_ids" in risk_df.columns
+    used = {i for ids in risk_df["disruption_ids"] for i in ids} if has_ids else {0}
 
-    d_node = "disruption"
-    g.add_node(d_node, layer=0, label=disruption.get("type", "disruption").replace("_", " ").title(),
-               color=DISRUPTION_COLOR,
-               hover=f"<b>{disruption.get('type', '').title()}</b><br>Severity: {disruption.get('severity')}"
-                     f"<br>Duration: {disruption.get('duration_min')} min")
-
-    blocked = disruption.get("road_id")
-    if blocked:
-        g.add_node(f"road:{blocked}", layer=1, label=road_names.get(blocked, blocked), color=DISRUPTION_COLOR,
-                   hover=f"<b>{road_names.get(blocked, blocked)}</b><br>Blocked road")
-        g.add_edge(d_node, f"road:{blocked}")
+    parent_of = {}  # disruption index -> node its vehicles hang from (road, or the disruption itself)
+    for i, d in enumerate(disruptions):
+        if i not in used:
+            continue
+        d_node = f"dis:{i}"
+        dtype = d.get("type", "disruption")
+        road = d.get("road_id")
+        g.add_node(d_node, layer=0, label=dtype.replace("_", " ").title(), color=DISRUPTION_COLOR,
+                   hover=f"<b>{dtype.replace('_', ' ').title()}</b> · {road_names.get(road, d.get('vehicle_id') or '')}"
+                         f"<br>Severity: {d.get('severity')}<br>Duration: {d.get('duration_min')} min")
+        parent_of[i] = d_node
+        if road:
+            r_node = f"road:{road}"
+            if r_node not in g:
+                kind = "Breakdown location" if dtype == "breakdown" else "Blocked road"
+                g.add_node(r_node, layer=1, label=road_names.get(road, road), color=DISRUPTION_COLOR,
+                           hover=f"<b>{road_names.get(road, road)}</b><br>{kind}")
+            g.add_edge(d_node, r_node)
+            parent_of[i] = r_node
 
     df = risk_df.sort_values(["vehicle_id", "stop_order"])
     for vid, group in df.groupby("vehicle_id", sort=False):
@@ -45,7 +60,10 @@ def build_graph(disruption, risk_df, data):
         g.add_node(v_node, layer=2, label=vid, color=LABEL_COLORS[worst],
                    hover=f"<b>{vid}</b> {'' if v is None else v['reg_no']}<br>"
                          f"Driver: {'' if v is None else v['driver']}<br>{len(group)} affected stops · worst: {worst}")
-        g.add_edge(f"road:{blocked}" if blocked else d_node, v_node)
+        ids = sorted({i for ids in group["disruption_ids"] for i in ids}) if has_ids else [0]
+        for i in ids:
+            if i in parent_of:
+                g.add_edge(parent_of[i], v_node)
 
         for _, row in group.iterrows():
             del_node = f"del:{row['delivery_id']}"
@@ -144,4 +162,11 @@ if __name__ == "__main__":
     print("nodes:", graph.number_of_nodes(), "edges:", graph.number_of_edges())
     fig = render_graph(graph)
     print("traces:", len(fig.data))
+
+    rain = parse_disruption("Heavy rain flooding at Trichy Road, 45 mins", data, use_llm=False)
+    both = [demo, rain]
+    graph = build_graph(both, score_risk(compute_impact(both, data)[0], both), data)
+    print("two disruptions -> nodes:", graph.number_of_nodes(), "| V3 parents:", sorted(graph.predecessors("veh:V3")))
+    assert set(graph.predecessors("veh:V3")) == {"road:R1", "road:R2"}
+    render_graph(graph)
     print("graph_viz OK")

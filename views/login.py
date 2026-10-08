@@ -176,5 +176,3 @@ with st.container(key="login_page"):
             if st.button("Back to sign in", icon=":material/arrow_back:", type="tertiary", key="reset_back"):
                 go("signin", reset_step=1, reset_demo=None)
                 st.rerun()
-
-lui.footer()

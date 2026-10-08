@@ -118,7 +118,6 @@ def page_css():
 .lg-or::before, .lg-or::after {{ content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.12); }}
 .lg-link a {{ color: #93C5FD; text-decoration: none; font-weight: 600; font-size: 14px; }}
 .lg-link {{ text-align: right; margin-top: 6px; }}
-.lg-foot {{ position: relative; z-index: 1; text-align: center; color: #64748B; font-size: 12px; margin-top: 18px; }}
 .lg-demo {{ font-size: 11px; font-weight: 800; letter-spacing: .08em; color: #FDE68A; margin: 14px 0 6px; text-align: center; }}
 [class*="st-key-demo_"] button {{ border-radius: 999px !important; min-height: 38px !important; font-size: 13px !important;
   background: rgba(255,255,255,.06) !important; border: 1px solid rgba(253,230,138,.35) !important; color: #FDE68A !important;
@@ -146,10 +145,6 @@ def brand_header():
         st.markdown(f"""<div class="lg-mark">{ui.MARK_SVG}<span>{ui.APP_NAME}</span></div>
 <p class="lg-tag">{escape(ui.TAGLINE)}</p><p class="lg-sub">Disruption-Aware Logistics Decision Support</p>
 <div class="lg-feats">{feats}</div>""", unsafe_allow_html=True)
-
-
-def footer():
-    st.markdown(f"<div class='lg-foot'>HackNext'26 · {escape(ui.TEAM_NAME)}</div>", unsafe_allow_html=True)
 
 
 GOOGLE_G = ("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'>"

@@ -9,7 +9,6 @@ import streamlit as st
 
 from modules import guards, store
 from modules.data_loader import NOW_MIN, min_to_hhmm
-from modules.parser import setting
 
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 CSS_PATH = ASSETS / "style.css"
@@ -17,7 +16,6 @@ LOGO_PATH, MARK_PATH, FAVICON_PATH = ASSETS / "logo.svg", ASSETS / "logo_mark.sv
 APP_NAME = "DEPORT"
 APP_TITLE = "DEPORT – Disruption-Aware Logistics Decision Support System"
 TAGLINE = "From Disruption to Decision."
-TEAM_NAME = setting("TEAM_NAME", "Team DEPORT")  # sign-in page footer; set TEAM_NAME in secrets to change
 MARK_SVG = MARK_PATH.read_text(encoding="utf-8").split("-->", 1)[-1].strip()
 MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">' + MARK_SVG
 BRAND, NAVY, AMBER = "#3B82F6", "#0B1E3F", "#F59E0B"

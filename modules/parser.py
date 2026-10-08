@@ -194,8 +194,13 @@ def setting(name, default=None):
         return default
 
 
+def offline():
+    """RIPPLE_OFFLINE=1 switches every AI/network call off (used by the tests)."""
+    return os.getenv("RIPPLE_OFFLINE") == "1"
+
+
 def llm_available():
-    return bool(setting("GEMINI_API_KEY") or setting("GROQ_API_KEY"))
+    return not offline() and bool(setting("GEMINI_API_KEY") or setting("GROQ_API_KEY"))
 
 
 def call_llm(prompt, want_json=False, timeout=8):

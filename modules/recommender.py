@@ -189,12 +189,17 @@ def recommend(impact, disruptions, data, polish=True):
             "why": why,
             "risk_label": row["risk_label"],
             "messages": [
-                {"to": f"{backup['driver']} (driver, {backup.name})",
+                {"to": f"{backup['driver']} (driver, {backup.name})", "kind": "driver", "vehicle_id": backup.name,
                  "text": f"{backup['driver']}, please collect {row['delivery_id']} from "
                          f"{source['driver']} ({row['original_vehicle']}) and deliver to "
                          f"{row['customer']}, {row['address_area']} by {eta_txt}. "
                          f"Avoid {name_of(row['cause_road_id'])}."},
-                {"to": f"{row['customer']} ({row['customer_phone']})",
+                {"to": f"{source['driver']} (driver, {row['original_vehicle']})", "kind": "driver",
+                 "vehicle_id": row["original_vehicle"],
+                 "text": f"{source['driver']}, hand {row['delivery_id']} ({row['customer']}) to {backup['driver']} "
+                         f"in the backup {backup['type']} {backup.name} when they reach you. Continue with your other stops."},
+                {"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer",
+                 "customer": row["customer"], "phone": row["customer_phone"],
                  "text": _customer_sms(row, eta_txt, f"We've moved it to a dedicated vehicle ({backup['reg_no']}). ")},
             ],
         })
@@ -265,7 +270,7 @@ def recommend(impact, disruptions, data, polish=True):
             "risk_label": protected["risk_label"].iloc[0],
             "via_roads": list(by_alt),
             "messages": [
-                {"to": f"{vehicle['driver']} (driver, {vid})",
+                {"to": f"{vehicle['driver']} (driver, {vid})", "kind": "driver", "vehicle_id": vid,
                  "text": f"{vehicle['driver']}, {avoid_text}. Next stops: {stops}."},
             ],
         })
@@ -297,7 +302,8 @@ def recommend(impact, disruptions, data, polish=True):
             "deliveries_protected": [row["delivery_id"]],
             "why": why,
             "risk_label": row["risk_label"],
-            "messages": [{"to": f"{row['customer']} ({row['customer_phone']})",
+            "messages": [{"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer",
+                          "customer": row["customer"], "phone": row["customer_phone"],
                           "text": _customer_sms(row, min_to_hhmm(new_eta))}],
         })
         if row["action"] == "":
@@ -318,7 +324,8 @@ def recommend(impact, disruptions, data, polish=True):
             "deliveries_protected": [row["delivery_id"]],
             "why": why,
             "risk_label": row["risk_label"],
-            "messages": [{"to": f"{row['customer']} ({row['customer_phone']})",
+            "messages": [{"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer",
+                          "customer": row["customer"], "phone": row["customer_phone"],
                           "text": _customer_sms(row, min_to_hhmm(eta))}],
         })
         if eta > row["deadline_min"]:  # customer agrees a new slot

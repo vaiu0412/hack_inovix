@@ -2,7 +2,8 @@
 
 Rule-based parsing always works. If GEMINI_API_KEY or GROQ_API_KEY is set,
 we try an LLM first and fall back to rules on any error.
-Supports simple Tanglish ("accident aachu", "mazhai", "late aagum", ...).
+Supports simple Tanglish ("accident aachu", "mazhai", "rendu mani neram") and common
+Tamil words, and finds places even when they are misspelled (see modules/places.py).
 """
 import json
 import os
@@ -10,30 +11,38 @@ import re
 import time
 import urllib.request
 
+from modules.places import best_road
+
 SEVERITIES = ["low", "medium", "high", "critical"]
 
 # Checked in this order: the first type with a matching keyword wins.
 TYPE_KEYWORDS = [
-    ("breakdown", ["breakdown", "break down", "broke down", "puncture", "flat tyre", "flat tire",
-                   "engine", "vandi nikkudhu", "vandi ninnuduchu", "repair"]),
-    ("accident", ["accident", "crash", "collision", "collided", "mothiduchu"]),
-    ("flood", ["flood", "flooding", "waterlogging", "water logging", "rain", "mazhai", "thanni"]),
-    ("protest", ["protest", "strike", "rally", "procession", "bandh", "dharna", "maraiyal"]),
+    ("breakdown", ["breakdown", "break down", "broke down", "brake down", "puncture", "flat tyre",
+                   "flat tire", "tyre burst", "tire burst", "engine", "vandi nikkudhu", "vandi ninnuduchu",
+                   "repair", "பஞ்சர்", "பழுது", "ரிப்பேர்"]),
+    ("accident", ["accident", "crash", "collision", "collided", "mothiduchu", "விபத்து", "மோதல்"]),
+    ("flood", ["flood", "flooding", "waterlogging", "water logging", "rain", "mazhai", "thanni",
+               "மழை", "வெள்ளம்"]),
+    ("protest", ["protest", "strike", "rally", "procession", "bandh", "dharna", "maraiyal",
+                 "போராட்டம்", "மறியல்"]),
     ("closure", ["closed", "closure", "road work", "roadwork", "maintenance", "diversion",
-                 "barricade", "blocked", "block"]),
-    ("traffic", ["traffic", "jam", "congestion", "slow moving", "nerisal"]),
+                 "barricade", "blocked", "block", "அடைப்பு", "பிளாக்"]),
+    ("traffic", ["traffic", "jam", "congestion", "slow moving", "nerisal", "டிராபிக்", "நெரிசல்"]),
+    ("customer_unavailable", ["customer not available", "not available", "door locked", "no answer",
+                              "not picking", "not answering", "customer illa", "aal illa", "phone edukala"]),
     ("requirement_change", ["deadline", "earlier", "prepone", "postpone", "reschedule",
                             "wants delivery", "requirement", "change order", "cancel"]),
 ]
 
 BASE_SEVERITY = {
     "accident": "high", "closure": "high", "breakdown": "high", "flood": "medium",
-    "protest": "medium", "traffic": "medium", "requirement_change": "low", "unknown": "medium",
+    "protest": "medium", "traffic": "medium", "requirement_change": "low", "customer_unavailable": "low",
+    "unknown": "medium",
 }
 
 DEFAULT_DURATION = {
     "accident": 60, "closure": 120, "breakdown": 60, "flood": 90,
-    "protest": 90, "traffic": 30, "requirement_change": 0, "unknown": 60,
+    "protest": 90, "traffic": 30, "requirement_change": 0, "customer_unavailable": 0, "unknown": 60,
 }
 
 STRONG_WORDS = ["blocked", "completely", "fully", "full ah", "full-ah", "totally", "major",
@@ -42,6 +51,16 @@ WEAK_WORDS = ["minor", "slight", "small", "konjam", "little", "partially", "part
 
 DURATION_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*(hours?|hrs?|hr|h|mani(?:\s*neram)?|minutes?|mins?|min|m)\b"
+)
+TAMIL_DURATION_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(மணி|நிமிட)")
+# spoken numbers in voice notes: "two hours", "rendu mani", "muppathu minutes"
+NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "ten": 10, "fifteen": 15, "twenty": 20,
+    "thirty": 30, "forty": 40, "forty five": 45, "fifty": 50, "oru": 1, "rendu": 2, "randu": 2,
+    "moonu": 3, "munu": 3, "naalu": 4, "nalu": 4, "anju": 5, "pathu": 10, "irupathu": 20, "muppathu": 30,
+}
+NUMBER_WORD_RE = re.compile(
+    r"\b(" + "|".join(sorted(NUMBER_WORDS, key=len, reverse=True)) + r")\s+(?=(hours?|hrs?|hr|mani|minutes?|mins?|min))"
 )
 REG_RE = re.compile(r"\bTN[\s-]?(\d{2})[\s-]?([A-Z]{1,2})[\s-]?(\d{3,4})\b", re.IGNORECASE)
 VEHICLE_ID_RE = re.compile(r"\bV(\d{1,2})\b", re.IGNORECASE)
@@ -61,8 +80,13 @@ def detect_type(text):
 
 def detect_duration(text):
     """Return minutes, or None if no duration is mentioned."""
-    if re.search(r"half\s*(an)?\s*(hour|hr)|arai\s*mani", text):
+    if re.search(r"half\s*(an)?\s*(hour|hr)|arai\s*mani|அரை\s*மணி", text):
         return 30
+    text = NUMBER_WORD_RE.sub(lambda m: f"{NUMBER_WORDS[m.group(1)]} ", text)
+    tamil = TAMIL_DURATION_RE.search(text)
+    if tamil:
+        value = float(tamil.group(1))
+        return int(round(value * 60 if tamil.group(2) == "மணி" else value))
     match = DURATION_RE.search(text)
     if match:
         value, unit = float(match.group(1)), match.group(2)
@@ -74,23 +98,21 @@ def detect_duration(text):
     return None
 
 
-def match_road(text, roads):
-    """Find the road mentioned in the text using aliases.
-
-    Longest alias wins (more specific), ties go to the earliest mention.
-    Returns (road_id, road_name, alias) or (None, None, None).
-    """
-    best = None
-    for _, road in roads.iterrows():
-        for alias in road["aliases"] + [road["name"].lower()]:
-            m = re.search(r"(?<![a-z0-9])" + re.escape(alias) + r"(?![a-z0-9])", text)
-            if m:
-                key = (len(alias), -m.start())
-                if best is None or key > best[0]:
-                    best = (key, road["road_id"], road["name"], alias)
+def locate(text):
+    """Fuzzy place lookup: {road_id, road_name, place, alias, score, suggestions}."""
+    best, others = best_road(text)
+    suggestions = [f"{m['place']} ({m['road_name']})" if m["place"] != m["road_name"] else m["road_name"]
+                   for m in others]
     if best is None:
-        return None, None, None
-    return best[1], best[2], best[3]
+        return {"road_id": None, "road_name": None, "place": None, "alias": "", "score": 0,
+                "suggestions": suggestions}
+    return {**{k: best[k] for k in ["road_id", "road_name", "place", "alias", "score"]}, "suggestions": suggestions}
+
+
+def match_road(text, roads=None):
+    """Find the road mentioned in the text. Returns (road_id, road_name, alias) or (None, None, None)."""
+    found = locate(text)
+    return found["road_id"], found["road_name"], found["alias"] or None
 
 
 def match_vehicle(text, vehicles):
@@ -131,18 +153,21 @@ def parse_rules(text, data):
     duration_given = duration is not None
     if duration is None:
         duration = DEFAULT_DURATION[dtype]
-    road_id, road_name, alias = match_road(low, data["roads"])
+    where = locate(raw)
+    road_id = where["road_id"]
     vehicle_id = match_vehicle(raw, data["vehicles"])
 
     confidence = 0.4
-    confidence += 0.25 if (road_id or vehicle_id) else 0
+    confidence += 0.25 * where["score"] / 100 if road_id else (0.25 if vehicle_id else 0)
     confidence += 0.2 if dtype != "unknown" else 0
     confidence += 0.1 if duration_given else 0
     return {
         "type": dtype,
         "road_id": road_id,
-        "road_name": road_name,
-        "location_text": alias or "",
+        "road_name": where["road_name"],
+        "place": where["place"],
+        "suggestions": where["suggestions"],
+        "location_text": where["alias"] or "",
         "severity": detect_severity(low, dtype, duration, duration_given),
         "duration_min": int(duration),
         "vehicle_id": vehicle_id,
@@ -223,11 +248,15 @@ def _post_json(url, body, headers, timeout):
 
 
 def parse_llm(text, data):
+    from modules.data_loader import load_places
+
     roads = "\n".join(f"- {r.road_id}: {r.name}" for r in data["roads"].itertuples())
+    areas = ", ".join(f"{p.name}={p.road_id}" for p in load_places().itertuples() if p.kind != "road")
     vehicles = "\n".join(f"- {v.vehicle_id}: {v.reg_no} driver {v.driver}" for v in data["vehicles"].itertuples())
     prompt = f"""You extract logistics disruptions in Coimbatore from short messages (English or Tanglish).
 Roads:
 {roads}
+Areas and landmarks (name=road_id): {areas}
 Vehicles:
 {vehicles}
 Return ONLY JSON with keys: type (one of {[t for t, _ in TYPE_KEYWORDS]} or "unknown"),
@@ -239,6 +268,10 @@ Message: {text}"""
     road_ids = set(data["roads"]["road_id"])
     dtype = out.get("type") if out.get("type") in BASE_SEVERITY else "unknown"
     road_id = out.get("road_id") if out.get("road_id") in road_ids else None
+    place = None
+    if road_id is None:  # the model may answer with a place name instead of an id
+        where = locate(f"{out.get('location_text') or ''} {text}")
+        road_id, place = where["road_id"], where["place"]
     vehicle_id = out.get("vehicle_id") if out.get("vehicle_id") in set(data["vehicles"]["vehicle_id"]) else None
     severity = out.get("severity") if out.get("severity") in SEVERITIES else BASE_SEVERITY[dtype]
     if road_id is None and vehicle_id is None:
@@ -249,6 +282,8 @@ Message: {text}"""
         "road_id": road_id,
         "road_name": road_name,
         "location_text": str(out.get("location_text") or ""),
+        "place": place or (str(out.get("location_text")) if out.get("location_text") else road_name),
+        "suggestions": [],
         "severity": severity,
         "duration_min": int(float(out.get("duration_min") or DEFAULT_DURATION[dtype])),
         "vehicle_id": vehicle_id,

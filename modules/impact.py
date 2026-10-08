@@ -24,6 +24,7 @@ IMPACT_COLUMNS = [
     "customer_phone", "severity", "disruption_ids", "parts", "cause_type", "cause_road_id",
 ]
 SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+NO_RIPPLE_TYPES = ("requirement_change", "customer_unavailable")  # affect one stop, not a road
 
 
 def as_list(disruptions):
@@ -57,7 +58,7 @@ def find_affected(disruption, data):
             rows.append((d, k, d["road_id"] == road_id))
         return rows
 
-    if disruption.get("type") == "requirement_change" or not road_id:
+    if disruption.get("type") in NO_RIPPLE_TYPES or not road_id:
         return rows
 
     for vid, vehicle in vehicles.iterrows():
@@ -138,8 +139,8 @@ def compute_impact(disruptions, data):
     if impact.empty:
         if not disruptions:
             summary["message"] = "No disruption reported yet."
-        elif all(d.get("type") == "requirement_change" for d in disruptions):
-            summary["message"] = "Requirement change only: no road or vehicle is blocked, so no ripple."
+        elif all(d.get("type") in NO_RIPPLE_TYPES for d in disruptions):
+            summary["message"] = "Only one stop is affected: no road or vehicle is blocked, so no ripple."
         elif all(not d.get("road_id") and not d.get("vehicle_id") for d in disruptions):
             summary["message"] = "Couldn't match a known road or vehicle. Please pick the road manually."
         elif len(disruptions) == 1:

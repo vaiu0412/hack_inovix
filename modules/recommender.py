@@ -27,7 +27,8 @@ RESCHEDULE_BUFFER_MIN = 30
 TYPE_WORDS = {
     "accident": "an accident", "closure": "a road closure", "flood": "flooding",
     "breakdown": "a vehicle breakdown", "traffic": "heavy traffic", "protest": "a protest",
-    "requirement_change": "a change in plans", "unknown": "a disruption",
+    "requirement_change": "a change in plans", "customer_unavailable": "the customer not being available",
+    "unknown": "a disruption",
 }
 
 
@@ -129,7 +130,8 @@ def recommend(impact, disruptions, data, polish=True):
 
     # roads that are really blocked (a breakdown only stops its own vehicle)
     road_type = {d["road_id"]: d.get("type") for d in disruptions
-                 if d.get("road_id") and d.get("type") not in ("breakdown", "requirement_change")}
+                 if d.get("road_id") and d.get("type") not in ("breakdown", "requirement_change",
+                                                               "customer_unavailable")}
     blocked_roads = set(road_type)
 
     after = impact.copy()

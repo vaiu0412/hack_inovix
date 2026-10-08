@@ -17,6 +17,9 @@ state = deliveries.apply(lambda d: "done" if d["status"] == "delivered"
                          else ui.risk_state(risk.get(d["delivery_id"], "Low")), axis=1)
 deliveries = deliveries.assign(state=state, partner=deliveries["vehicle_id"].map(partner_of).fillna("—"))
 
+ui.restore_pref("del_state", ["normal", "delayed", "critical", "done"], multi=True)
+ui.restore_pref("del_priority", ["medical", "perishable", "express", "standard"], multi=True)
+ui.restore_pref("del_partner", [None] + sorted(set(partner_of.values())))
 with st.container(horizontal=True, vertical_alignment="center", gap="small"):
     query = st.text_input("Search", placeholder="Customer, area, ID", label_visibility="collapsed",
                           icon=":material/search:", width=240)

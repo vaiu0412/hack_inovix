@@ -7,10 +7,11 @@ Partners go through modules/partner_scope (only their own data, reports always f
 themselves); the branch admin's 'Log issue' uses the branch-scoped functions.
 """
 from html import escape
+from pathlib import Path
 
 import streamlit as st
 
-from modules import issues, ui
+from modules import issues, store, ui
 from modules.data_loader import load_all
 from modules.voice import available_engines
 
@@ -55,12 +56,55 @@ def _key(prefix, name):
 def _clear(prefix):
     st.session_state[f"{prefix}_round"] = _round(prefix) + 1
     st.session_state.pop(f"{prefix}_preview", None)
+    user_id = st.session_state.get("user_id")
+    if user_id:
+        store.clear_draft(user_id, prefix)  # sent or started again: the draft is done
     ui.resume_live_updates()
+
+
+def _restore_draft(prefix, user_id):
+    """Once per form round: put a saved draft (tile, text, voice note) back into the fields."""
+    if not user_id or st.session_state.get(_key(prefix, "draft_loaded")):
+        return
+    st.session_state[_key(prefix, "draft_loaded")] = True
+    draft = store.get_draft(user_id, prefix)
+    if not draft:
+        return
+    if draft["tile"]:
+        st.session_state[_key(prefix, "tile")] = draft["tile"]
+    if draft["text"] or draft["transcript"]:
+        st.session_state[_key(prefix, "text")] = draft["text"] or draft["transcript"]
+    if draft["audio_path"] and Path(draft["audio_path"]).exists():
+        st.session_state[_key(prefix, "saved_audio")] = draft["audio_path"]
+    st.session_state[_key(prefix, "draft_sig")] = (draft["tile"], draft["text"] or draft["transcript"] or "",
+                                                   draft["audio_path"])
+
+
+def _save_draft(prefix, user_id, tile, text, audio):
+    """Auto-save as the partner types, taps or records (kept across refresh, sign-out and restarts)."""
+    if not user_id:
+        return st.session_state.get(_key(prefix, "saved_audio"))
+    if audio:
+        signature = hash(audio)
+        if st.session_state.get(_key(prefix, "audio_sig")) != signature:  # a new recording: keep it as a file
+            st.session_state[_key(prefix, "audio_sig")] = signature
+            st.session_state[_key(prefix, "saved_audio")] = str(store.save_voice(user_id, audio))
+    saved_audio = st.session_state.get(_key(prefix, "saved_audio"))
+    now = (tile, text or "", saved_audio)
+    if now != st.session_state.get(_key(prefix, "draft_sig")):
+        st.session_state[_key(prefix, "draft_sig")] = now
+        if tile or (text or "").strip() or saved_audio:
+            store.save_draft(user_id, prefix, tile=tile, text=text, audio_path=saved_audio)
+        else:
+            store.clear_draft(user_id, prefix)
+    return saved_audio
 
 
 def report_form(partner_id, branch_id, prefix="report", source="partner"):
     """Draw the form. Returns the new issue id right after sending, else None."""
     preview_fn, submit_fn, road_options_fn = _backend(partner_id, source, branch_id)
+    user_id = st.session_state.get("user_id")
+    _restore_draft(prefix, user_id)
     picked_key = _key(prefix, "tile")
     picked = st.session_state.get(picked_key)
 
@@ -75,15 +119,19 @@ def report_form(partner_id, branch_id, prefix="report", source="partner"):
     audio = st.audio_input("Record voice", key=_key(prefix, "audio"))
     text = st.text_area("Or type", key=_key(prefix, "text"), height=80,
                         placeholder="Avinashi road la accident, rendu mani neram block")
+    saved_audio = _save_draft(prefix, user_id, picked, text, audio.getvalue() if audio else None)
+    if saved_audio and not audio:
+        st.caption("Saved voice note")
+        st.audio(saved_audio)
     engines = available_engines()
-    st.caption(f"Tamil, English or both · {engines[0] if engines else 'type one line'}")
+    st.caption(f"Tamil, English or both · {engines[0] if engines else 'type one line'} · draft auto-saved")
 
     # always clickable: a typed line is committed when the field loses focus, so no Ctrl+Enter is needed
     if st.button("Check", type="primary", width="stretch", key=_key(prefix, "check"), icon=":material/fact_check:"):
-        if not (audio or text.strip() or quick):
+        if not (audio or saved_audio or text.strip() or quick):
             st.warning("Tap a type, record or type.", icon=":material/info:")
             return None
-        audio_bytes = audio.getvalue() if audio else None
+        audio_bytes = audio.getvalue() if audio else (Path(saved_audio).read_bytes() if saved_audio else None)
         ui.pause_live_updates()  # keep the preview on screen until it is sent
         with st.spinner("Listening…"):
             result = preview_fn(text=text, audio=audio_bytes, quick_type=quick)

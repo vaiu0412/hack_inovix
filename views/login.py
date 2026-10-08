@@ -74,7 +74,7 @@ with st.container(key="login_page"):
                 identifier = st.text_input("Email or ID", placeholder=PLACEHOLDER, key="si_id", autocomplete="username")
                 password = st.text_input("Password", type="password", key="si_pw", autocomplete="current-password")
                 left, right = st.columns(2, vertical_alignment="center")
-                remember = left.checkbox("Remember me", key="si_remember")
+                remember = left.checkbox("Remember me", value=True, key="si_remember")
                 right.markdown("<div class='lg-link'><a href='?view=forgot' target='_self'>Forgot password?</a></div>",
                                unsafe_allow_html=True)
                 submitted = st.form_submit_button("Sign in", type="primary", width="stretch")

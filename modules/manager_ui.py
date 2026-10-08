@@ -158,11 +158,15 @@ def live_map_view(ctx, height=620, key="live_map", filters=True):
     view = partners
     focus = False
     if filters:
+        kinds = sorted(partners["vehicle_type"].unique())
+        ui.restore_pref(f"{key}_status", ["normal", "delayed", "critical", "available", "break"], multi=True)
+        ui.restore_pref(f"{key}_kind", kinds, multi=True)
+        ui.restore_pref(f"{key}_road", [None] + list(ctx["road_names"]))
+        ui.restore_pref(f"{key}_focus", [True, False])
         with st.container(horizontal=True, vertical_alignment="center", gap="small"):
             status_pick = st.pills("Status", ["normal", "delayed", "critical", "available", "break"],
                                    selection_mode="multi", format_func=ui.status_text, key=f"{key}_status",
                                    label_visibility="collapsed")
-            kinds = sorted(partners["vehicle_type"].unique())
             kind_pick = st.pills("Vehicle", kinds, selection_mode="multi", key=f"{key}_kind",
                                  format_func=lambda k: f"{ui.VEHICLE_EMOJI.get(k, '')} {k.title()}",
                                  label_visibility="collapsed")
@@ -258,6 +262,9 @@ def partner_panel(ctx, pid):
 def team_table(ctx):
     """Short columns, coloured status, search + 3 filters; a selected row opens the side panel."""
     partners, states = ctx["partners"], ctx["states"]
+    ui.restore_pref("team_status", ["normal", "delayed", "critical", "available", "break"], multi=True)
+    ui.restore_pref("team_kind", sorted(partners["vehicle_type"].unique()), multi=True)
+    ui.restore_pref("team_alerts", [True, False])
     with st.container(horizontal=True, vertical_alignment="center", gap="small"):
         query = st.text_input("Search", placeholder="Search name, ID, area", label_visibility="collapsed",
                               icon=":material/search:", width=260)

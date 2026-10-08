@@ -61,6 +61,11 @@ else:
     ]
 
 navigation = st.navigation(pages)
+last_page = ui.sync_prefs(user, navigation.url_path)  # filters + last page are saved per user in SQLite
+if last_page and role != "partner" and last_page != navigation.url_path:  # partners always open on Today
+    target = next((p for p in pages if p.url_path == last_page), None)
+    if target is not None:
+        st.switch_page(target)
 ui.sidebar_user()
 ui.live_updates()  # one refresh watcher for every page, at a fixed place in the sidebar
 if "_welcome" in st.session_state:

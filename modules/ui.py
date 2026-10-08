@@ -250,6 +250,44 @@ def rec_card(action):
             f'<div class="w">{escape(why)}</div><div class="i">{escape(impact)}</div></div>')
 
 
+# ---------------------------------------------------------------- saved preferences (filters, last page)
+PREF_KEYS = ("live_map_status", "live_map_kind", "live_map_road", "live_map_focus", "team_status", "team_kind",
+             "team_alerts", "del_state", "del_priority", "del_partner")
+
+
+def sync_prefs(user, page):
+    """First run after sign-in: load the user's saved preferences and return their last page.
+    Later runs: save filters / page that changed (stored in SQLite, so they survive sign-out and restarts)."""
+    uid = user["user_id"]
+    if st.session_state.get("_prefs_user") != uid:
+        st.session_state["_prefs_user"] = uid
+        st.session_state["_prefs"] = store.get_prefs(uid)
+        st.session_state["_prefs_seen"] = dict(st.session_state["_prefs"])
+        return st.session_state["_prefs"].get("last_page")
+    seen = st.session_state.setdefault("_prefs_seen", {})
+    changed = {k: st.session_state[k] for k in PREF_KEYS if k in st.session_state and st.session_state[k] != seen.get(k)}
+    if page and page != seen.get("last_page"):
+        changed["last_page"] = page
+    if changed:
+        store.set_prefs(uid, changed)
+        seen.update(changed)
+    return None
+
+
+def restore_pref(key, options, multi=False):
+    """Put a saved filter back before its widget is drawn (only values that are still valid)."""
+    if key in st.session_state:
+        return
+    value = st.session_state.get("_prefs", {}).get(key)
+    if value is None:
+        return
+    if multi:
+        value = [v for v in value if v in options]
+    elif value not in options:
+        return
+    st.session_state[key] = value
+
+
 # ---------------------------------------------------------------- live refresh
 def pause_live_updates(seconds=180):
     """Hold auto-refresh while someone is typing or recording (a rerun would clear the form)."""
@@ -298,9 +336,19 @@ def sidebar_user():
                        if user.get("branch_name") else ""), unsafe_allow_html=True)
         if st.button("Sign out", icon=":material/logout:", width="stretch", key="logout"):
             guards.logout()
-        if user["role"] == "super_admin":
-            with st.popover("Reset demo", icon=":material/restart_alt:", width="stretch"):
-                st.caption("Back to 09:00. Everyone is signed out.")
-                if st.button("Reset now", type="primary", key="reset_demo", width="stretch"):
-                    store.reset_demo()
-                    guards.logout()
+        if user["role"] == "super_admin" and st.button("Reset demo data", icon=":material/restart_alt:",
+                                                        width="stretch", key="reset_demo_open"):
+            reset_dialog()
+
+
+@st.dialog("Reset demo data?")
+def reset_dialog():
+    """Explicit, confirmed reset only. A timestamped backup is written to data/backups/ first."""
+    st.markdown("All branches go back to **09:00** and everyone is signed out. **A backup is saved first.**")
+    yes, no = st.columns(2)
+    if yes.button("Reset now", type="primary", key="reset_demo", width="stretch", icon=":material/restart_alt:"):
+        saved = store.reset_demo(backup=True)
+        store.audit("superadmin", "backup_saved", saved.name if saved else "")
+        guards.logout()
+    if no.button("Cancel", key="reset_cancel", width="stretch"):
+        st.rerun()

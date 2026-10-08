@@ -6,3 +6,7 @@ __pycache__/
 .venv/
 data/ripple.db
 data/ripple.db-*
+data/deport.db
+data/deport.db-*
+data/backups/
+data/voice/

@@ -4,7 +4,10 @@ Every operational row (partners, vehicles, deliveries, issues, disruptions, mess
 a branch_id, and every read/write function here takes a branch_id to scope by (None = all branches,
 used only by internal jobs and the Super Admin summaries).
 
-Set RIPPLE_DB to use another database file (the tests use a temporary one).
+Persistence: one file at a fixed absolute path, <project>/data/deport.db (set DEPORT_DB or RIPPLE_DB to use
+another file – the tests use a temporary one). Demo data is seeded ONLY when the database is empty; it is never
+reset automatically. "Reset demo" (Super Admin, with confirm) first saves a timestamped copy in data/backups/.
+Signing out only revokes the session. Every write goes through one connection helper that commits or rolls back.
 """
 import json
 import os
@@ -21,7 +24,7 @@ from modules.data_loader import (DATA_DIR, NOW_MIN, hhmm_to_min, load_all, load_
 from modules import geometry
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS branches (
     branch_id TEXT PRIMARY KEY, name TEXT NOT NULL, city TEXT, area TEXT, address TEXT, lat REAL, lng REAL,
@@ -43,7 +46,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
 CREATE TABLE IF NOT EXISTS issues (
     issue_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, partner_id TEXT, source TEXT,
     quick_type TEXT, text TEXT, audio BLOB, transcript TEXT, transcript_engine TEXT,
-    problem TEXT, summary TEXT, status TEXT, plan TEXT, decided_at TEXT, decision_note TEXT, branch_id TEXT);
+    problem TEXT, summary TEXT, status TEXT, plan TEXT, decided_at TEXT, decision_note TEXT, branch_id TEXT,
+    audio_path TEXT);
 CREATE TABLE IF NOT EXISTS disruptions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER, data TEXT, active INTEGER DEFAULT 1,
     created_at TEXT, branch_id TEXT);
@@ -65,6 +69,11 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS otp_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, purpose TEXT NOT NULL, code_hash TEXT NOT NULL,
     salt TEXT NOT NULL, expires_at REAL, used INTEGER DEFAULT 0, attempts INTEGER DEFAULT 0, created_at REAL);
+CREATE TABLE IF NOT EXISTS drafts (
+    user_id TEXT NOT NULL, form TEXT NOT NULL, tile TEXT, text TEXT, transcript TEXT, audio_path TEXT, updated_at TEXT,
+    PRIMARY KEY (user_id, form));
+CREATE TABLE IF NOT EXISTS user_prefs (
+    user_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT, updated_at TEXT, PRIMARY KEY (user_id, key));
 CREATE TABLE IF NOT EXISTS route_geometry (key TEXT PRIMARY KEY, points TEXT NOT NULL, source TEXT, meta TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, actor_user_id TEXT, action TEXT, target TEXT,
@@ -72,7 +81,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 """
 TABLES = ["branches", "roles", "permissions", "role_permissions", "partners", "vehicles", "deliveries", "issues",
           "disruptions", "messages", "events", "meta", "users", "sessions", "otp_codes", "audit_log",
-          "login_attempts"]
+          "login_attempts", "drafts", "user_prefs"]
 BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events"]
 JSON_FIELDS = {"problem", "plan"}
 OPEN_ISSUE_STATUSES = ("new", "analysed")
@@ -97,8 +106,44 @@ DEMO_ADMINS = [
 DEMO_PARTNER_PASSWORD = "Partner@123"
 
 
+DEFAULT_DB = DATA_DIR / "deport.db"
+OLD_DB = DATA_DIR / "ripple.db"  # name used before the DEPORT rebrand – adopted once, never deleted
+
+
 def db_path():
-    return Path(os.getenv("RIPPLE_DB", DATA_DIR / "ripple.db"))
+    custom = os.getenv("DEPORT_DB") or os.getenv("RIPPLE_DB")
+    if custom:
+        return Path(custom)
+    if not DEFAULT_DB.exists() and OLD_DB.exists():
+        adopt_old_db(OLD_DB, DEFAULT_DB)
+    return DEFAULT_DB
+
+
+def adopt_old_db(old, new):
+    """Copy the pre-rebrand database to the new name (SQLite backup API, safe while in use)."""
+    new.parent.mkdir(parents=True, exist_ok=True)
+    source, target = sqlite3.connect(old), sqlite3.connect(new)
+    try:
+        source.backup(target)
+    finally:
+        source.close()
+        target.close()
+
+
+def files_dir(name):
+    """data/voice, data/backups … next to the database file."""
+    folder = db_path().parent / name
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _open():
+    path = db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 
 def now_stamp():
@@ -115,15 +160,15 @@ _tx = threading.local()  # the open transaction of this thread (each Streamlit s
 
 @contextmanager
 def connect():
+    """The one connection helper: commit when the block succeeds, roll back when it raises."""
     shared = getattr(_tx, "conn", None)
     if shared is not None:  # inside transaction(): same connection, committed once at the end
         yield shared
         return
-    conn = sqlite3.connect(db_path(), timeout=10)
-    conn.row_factory = sqlite3.Row
+    conn = _open()
     try:
-        yield conn
-        conn.commit()
+        with conn:  # sqlite3: commit on success, rollback on exception
+            yield conn
     finally:
         conn.close()
 
@@ -134,8 +179,7 @@ def transaction():
     if getattr(_tx, "conn", None) is not None:
         yield _tx.conn
         return
-    conn = sqlite3.connect(db_path(), timeout=10)
-    conn.row_factory = sqlite3.Row
+    conn = _open()
     conn.execute("BEGIN IMMEDIATE")
     _tx.conn = conn
     try:
@@ -171,13 +215,16 @@ def _where(clauses):
 
 # ---------------------------------------------------------------- setup, migration, seed
 def init_db():
-    """Create the database on first use, upgrade older databases in place, seed demo data."""
+    """Create the tables, upgrade older databases in place, and seed the demo ONLY when the database is empty.
+    Runs on every page load, so it must never change existing data."""
     with connect() as conn:
+        conn.execute("PRAGMA journal_mode = WAL")  # readers never block the writer; stored in the file
         conn.executescript(SCHEMA)
-        ids = {r[0] for r in conn.execute("SELECT partner_id FROM partners")}
-    # empty, or the old P1-P6 partner IDs (partners added later by branch admins, e.g. DP107, are kept)
-    if not ids or any(not str(i).startswith("DP") for i in ids):
-        reset_demo()
+        empty = (conn.execute("SELECT COUNT(*) FROM partners").fetchone()[0] == 0
+                 and conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0) if "role_id" in _columns(
+            conn, "users") else conn.execute("SELECT COUNT(*) FROM partners").fetchone()[0] == 0
+    if empty:
+        reset_demo(backup=False)  # first run: nothing to keep
         return
     with connect() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
@@ -186,6 +233,8 @@ def init_db():
             _migrate_v3(conn)
         if current < 4:
             _migrate_v4(conn)
+        if current < 5:
+            _migrate_v5(conn)
         stamp = conn.execute("SELECT value FROM meta WHERE key = 'geometry_stamp'").fetchone()
         if not stamp or stamp["value"] != geometry.cache_stamp():  # the shapes file changed: reload it
             _seed_geometry(conn)
@@ -294,6 +343,13 @@ def route_geometry():
         return {r["key"]: json.loads(r["points"]) for r in conn.execute("SELECT key, points FROM route_geometry")}
 
 
+def _migrate_v5(conn):
+    """Persistence: drafts + preferences tables (created by SCHEMA) and voice-note file paths on issues."""
+    if "audio_path" not in _columns(conn, "issues"):
+        conn.execute("ALTER TABLE issues ADD COLUMN audio_path TEXT")
+    _set_version(conn, 5)
+
+
 def _set_version(conn, version):
     conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE "
                  "SET value = excluded.value", (str(version),))
@@ -302,11 +358,28 @@ def _set_version(conn, version):
     _bump(conn)
 
 
-def reset_demo():
-    """Wipe everything and load the demo data again (09:00, no issues, demo accounts restored)."""
+def backup(reason="manual"):
+    """Copy the whole database to data/backups/deport-YYYYmmdd-HHMMSS-<reason>.db. Returns the path."""
+    target = files_dir("backups") / f"deport-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{reason}.db"
+    source, copy = _open(), sqlite3.connect(target)
+    try:
+        source.backup(copy)
+    finally:
+        source.close()
+        copy.close()
+    return target
+
+
+def reset_demo(backup=True):
+    """Explicit reset only (Super Admin, after a confirm): back up first, then load the demo again
+    (09:00, no issues, demo accounts restored). Returns the backup path (None when nothing was saved)."""
+    saved = None
+    if backup and db_path().exists():
+        saved = globals()["backup"]("before-reset")
     data = load_all()
     partners = load_partners()
     with connect() as conn:
+        conn.execute("PRAGMA foreign_keys = OFF")  # dropping parent tables with FKs on would fail
         for table in TABLES:
             conn.execute(f"DROP TABLE IF EXISTS {table}")
         conn.executescript(SCHEMA)
@@ -333,8 +406,10 @@ def reset_demo():
                          (now_stamp(), "Day started at 09:00", branch_id))
         conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
         conn.execute("INSERT INTO audit_log(time, actor_user_id, action, target, details_json) VALUES (?,?,?,?,?)",
-                     (now_iso(), "system", "reset_demo", "all branches", "{}"))
+                     (now_iso(), "system", "reset_demo", "all branches",
+                      json.dumps({"backup": saved.name if saved else None})))
         _bump(conn)
+    return saved
 
 
 # ---------------------------------------------------------------- reads
@@ -516,13 +591,61 @@ def branch_summaries():
 
 
 # ---------------------------------------------------------------- writes
-def add_issue(partner_id, text="", audio=None, quick_type=None, source="partner", branch_id=None):
+def add_issue(partner_id, text="", audio=None, quick_type=None, source="partner", branch_id=None, audio_path=None):
+    if audio and not audio_path:
+        audio_path = str(save_voice(partner_id, audio))
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO issues(created_at, partner_id, source, quick_type, text, audio, status, branch_id) "
-            "VALUES (?,?,?,?,?,?, 'new', ?)", (now_stamp(), partner_id, source, quick_type, text, audio, branch_id))
+            "INSERT INTO issues(created_at, partner_id, source, quick_type, text, audio, audio_path, status, branch_id) "
+            "VALUES (?,?,?,?,?,?,?, 'new', ?)",
+            (now_stamp(), partner_id, source, quick_type, text, audio, audio_path, branch_id))
         _bump(conn)
         return cur.lastrowid
+
+
+# ---------------------------------------------------------------- voice files, drafts, preferences
+def save_voice(owner, audio):
+    """Voice note bytes -> data/voice/<owner>-<time>.wav (the path is stored in the database)."""
+    target = files_dir("voice") / f"{owner}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.wav"
+    target.write_bytes(audio)
+    return target
+
+
+def get_draft(user_id, form):
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM drafts WHERE user_id = ? AND form = ?", (user_id, form)).fetchone()
+    return dict(row) if row else None
+
+
+def save_draft(user_id, form, tile=None, text="", transcript="", audio_path=None):
+    """Half-written report, kept across refresh, sign-out and restarts until it is sent."""
+    with connect() as conn:
+        conn.execute("INSERT INTO drafts(user_id, form, tile, text, transcript, audio_path, updated_at) "
+                     "VALUES (?,?,?,?,?,?,?) ON CONFLICT(user_id, form) DO UPDATE SET tile = excluded.tile, "
+                     "text = excluded.text, transcript = excluded.transcript, audio_path = excluded.audio_path, "
+                     "updated_at = excluded.updated_at",
+                     (user_id, form, tile, text, transcript, audio_path, now_iso()))
+
+
+def clear_draft(user_id, form):
+    with connect() as conn:
+        conn.execute("DELETE FROM drafts WHERE user_id = ? AND form = ?", (user_id, form))
+
+
+def get_prefs(user_id):
+    with connect() as conn:
+        rows = conn.execute("SELECT key, value FROM user_prefs WHERE user_id = ?", (user_id,)).fetchall()
+    return {r["key"]: json.loads(r["value"]) for r in rows}
+
+
+def set_prefs(user_id, values):
+    """Last page, map filters, table filters … one row per key."""
+    if not values:
+        return
+    with connect() as conn:
+        conn.executemany("INSERT INTO user_prefs(user_id, key, value, updated_at) VALUES (?,?,?,?) "
+                         "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                         [(user_id, k, json.dumps(v), now_iso()) for k, v in values.items()])
 
 
 def update_issue(issue_id, **fields):

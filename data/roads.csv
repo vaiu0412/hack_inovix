@@ -1,0 +1,11 @@
+road_id,name,aliases,points,normal_speed_kmph
+R1,Avinashi Road,avinashi|avinashi road|avinashi rd|avinasi|avanashi|avinashi salai,"[[11.0045,76.9700],[11.0102,76.9845],[11.0168,76.9955],[11.0245,77.0025],[11.0272,77.0158],[11.0312,77.0375]]",35
+R2,Trichy Road,trichy|trichy road|trichy rd|tiruchi road|sungam,"[[10.9962,76.9690],[10.9965,76.9800],[10.9958,76.9945],[10.9975,77.0150],[10.9998,77.0310]]",30
+R3,Mettupalayam Road,mettupalayam|mettupalayam road|mettupalayam rd|mtp road,"[[11.0172,76.9618],[11.0245,76.9530],[11.0300,76.9470],[11.0500,76.9440],[11.0700,76.9420]]",35
+R4,Sathy Road,sathy|sathy road|sathy rd|sathyamangalam road,"[[11.0190,76.9690],[11.0300,76.9720],[11.0400,76.9760],[11.0600,76.9880],[11.0790,76.9990]]",35
+R5,Pollachi Road,pollachi|pollachi road|pollachi rd,"[[10.9900,76.9612],[10.9750,76.9640],[10.9580,76.9700],[10.9400,76.9770]]",40
+R6,DB Road (RS Puram),db road|d b road|db rd|rs puram|r s puram|diwan bahadur road,"[[11.0080,76.9480],[11.0086,76.9505],[11.0094,76.9568],[11.0100,76.9610]]",20
+R7,100 Feet Road (Gandhipuram),100 feet road|100 ft road|100 feet|100ft road|hundred feet road|gandhipuram,"[[11.0130,76.9625],[11.0185,76.9645],[11.0240,76.9665]]",25
+R8,Race Course Road,race course|race course road|racecourse,"[[11.0005,76.9725],[11.0020,76.9770],[11.0000,76.9815],[10.9975,76.9775]]",25
+R9,Peelamedu–Hope College Stretch,peelamedu hope college|hope college stretch|peelamedu stretch|peelamedu road|hope college,"[[11.0105,76.9880],[11.0150,76.9990],[11.0200,77.0060],[11.0232,77.0170],[11.0260,77.0330]]",25
+R10,Ukkadam–Town Hall Road,ukkadam|town hall|ukkadam town hall|ukkadam road|town hall road,"[[10.9895,76.9612],[10.9905,76.9612],[10.9935,76.9608],[10.9965,76.9603]]",20

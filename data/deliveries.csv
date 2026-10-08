@@ -1,0 +1,31 @@
+delivery_id,customer,address_area,lat,lng,vehicle_id,road_id,stop_order,planned_eta,deadline,priority,customer_phone
+D01,Lakshmi Boutique,RS Puram,11.0086,76.9505,V1,R6,1,09:20,11:00,standard,+91 90000 10001
+D02,Sri Ram Medicals,RS Puram,11.0094,76.9568,V1,R6,2,09:35,11:30,express,+91 90000 10002
+D03,Gandhipuram Book House,Gandhipuram,11.0185,76.9645,V1,R7,3,09:55,12:00,standard,+91 90000 10003
+D04,Lakshmi Mills Textiles,Lakshmi Mills,11.0102,76.9845,V1,R1,4,10:15,14:30,standard,+91 90000 10004
+D05,PSG Tech Lab Stores,PSG Tech,11.0245,77.0025,V1,R1,5,10:30,12:45,express,+91 90000 10005
+D06,KMCH Hospital (Insulin),KMCH - Avinashi Road,11.0312,77.0375,V1,R1,6,10:50,11:30,medical,+91 90000 10006
+D07,Ukkadam Wholesale Traders,Ukkadam,10.9905,76.9612,V2,R10,1,09:15,11:00,standard,+91 90000 10007
+D08,Town Hall Electronics,Town Hall,10.9935,76.9608,V2,R10,2,09:30,12:00,express,+91 90000 10008
+D09,Race Course Cafe,Race Course,11.0020,76.9770,V2,R8,3,09:45,11:00,perishable,+91 90000 10009
+D10,FreshMart Dairy (Milk & Curd),Nava India,11.0168,76.9955,V2,R1,4,10:00,11:00,perishable,+91 90000 10010
+D11,Hope College Stationers,Hope College,11.0272,77.0158,V2,R1,5,10:20,13:45,standard,+91 90000 10011
+D12,Peelamedu Mobile Hub,Peelamedu,11.0200,77.0060,V2,R9,6,10:40,12:00,express,+91 90000 10012
+D13,Sungam Hardware,Sungam,10.9965,76.9800,V3,R2,1,09:20,12:00,standard,+91 90000 10013
+D14,Ramanathapuram Supermarket,Ramanathapuram,10.9958,76.9945,V3,R2,2,09:45,12:30,perishable,+91 90000 10014
+D15,Singanallur Auto Parts,Singanallur,10.9998,77.0310,V3,R2,3,10:15,13:00,standard,+91 90000 10015
+D16,Codissia Trade Fair Office,Codissia - Avinashi Road,11.0290,77.0270,V3,R1,4,11:00,16:00,standard,+91 90000 10016
+D17,Hotel Annalakshmi (Vegetables),Peelamedu,11.0150,76.9990,V3,R9,5,11:20,14:00,perishable,+91 90000 10017
+D18,Hope College Furniture Mart,Hope College,11.0232,77.0170,V3,R9,6,11:40,17:00,standard,+91 90000 10018
+D19,Saibaba Colony Pharmacy,Saibaba Colony,11.0245,76.9530,V4,R3,1,09:20,11:00,medical,+91 90000 10019
+D20,Kavundampalayam Bakery,Kavundampalayam,11.0300,76.9470,V4,R3,2,09:40,11:30,perishable,+91 90000 10020
+D21,Thudiyalur Agro Store,Thudiyalur,11.0700,76.9420,V4,R3,3,10:10,13:00,standard,+91 90000 10021
+D22,KGiSL IT Park Admin,Saravanampatti,11.0790,76.9990,V4,R4,4,10:40,13:00,express,+91 90000 10022
+D23,Chinnavedampatti Clinic,Chinnavedampatti,11.0600,76.9880,V4,R4,5,11:00,12:30,medical,+91 90000 10023
+D24,Ganapathy Textiles,Ganapathy,11.0400,76.9760,V4,R4,6,11:25,15:00,standard,+91 90000 10024
+D25,Town Hall Jewellers,Town Hall,10.9965,76.9603,V5,R10,1,09:15,11:00,express,+91 90000 10025
+D26,Kurichi Home Needs,Kurichi,10.9750,76.9640,V5,R5,2,09:40,12:00,standard,+91 90000 10026
+D27,Sundarapuram Fruit Stall,Sundarapuram,10.9580,76.9700,V5,R5,3,10:00,11:30,perishable,+91 90000 10027
+D28,Eachanari Temple Trust,Eachanari,10.9400,76.9770,V5,R5,4,10:25,13:00,standard,+91 90000 10028
+D29,Ramanathapuram Diagnostics,Ramanathapuram,10.9960,76.9955,V5,R2,5,11:00,12:30,medical,+91 90000 10029
+D30,Singanallur Grocery Mart,Singanallur,10.9995,77.0300,V5,R2,6,11:20,14:00,standard,+91 90000 10030

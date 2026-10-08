@@ -8,6 +8,7 @@ Tamil words, and finds places even when they are misspelled (see modules/places.
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -182,6 +183,8 @@ def parse_rules(text, data):
 LLM_COOLDOWN_SEC = 300  # after a failure, skip the LLM for 5 minutes
 # Groq chat models open to normal (free/developer) keys, best first. Override with GROQ_MODEL.
 GROQ_MODELS = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "llama-3.1-8b-instant"]
+# last outcome of an AI call, shown on the Activity page (never contains the key)
+LLM_STATUS = {"provider": None, "model": None, "ok_at": None, "error": None, "error_at": None}
 _llm_paused_until = 0.0
 
 
@@ -211,7 +214,13 @@ def llm_available():
     return not offline() and bool(setting("GEMINI_API_KEY") or setting("GROQ_API_KEY"))
 
 
-def call_llm(prompt, want_json=False, timeout=8):
+def llm_status():
+    """What happened on the last AI call, for the status line in the app."""
+    paused = max(0, int(_llm_paused_until - time.time()))
+    return {**LLM_STATUS, "available": llm_available(), "paused_sec": paused}
+
+
+def call_llm(prompt, want_json=False, timeout=15):
     """Send a prompt to Gemini or Groq. Returns text, raises on any problem.
 
     One failure (bad key, no network, timeout) pauses the LLM for a while,
@@ -221,10 +230,35 @@ def call_llm(prompt, want_json=False, timeout=8):
     if time.time() < _llm_paused_until:
         raise RuntimeError("LLM paused after a recent failure")
     try:
-        return _call_provider(prompt, want_json, timeout)
-    except Exception:
+        text = _call_provider(prompt, want_json, timeout)
+    except Exception as error:
         _llm_paused_until = time.time() + LLM_COOLDOWN_SEC
+        LLM_STATUS.update(error=str(error)[:300], error_at=time.strftime("%H:%M:%S"))
+        print(f"[ripple] AI call failed, using rules for {LLM_COOLDOWN_SEC // 60} min: {error}", file=sys.stderr)
         raise
+    LLM_STATUS.update(ok_at=time.strftime("%H:%M:%S"), error=None)
+    return text
+
+
+def json_from_text(text):
+    """Parse a JSON object from a model reply, even if it is wrapped in prose or ``` fences."""
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        start, end = str(text).find("{"), str(text).rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return json.loads(text[start:end + 1])
+
+
+def _http_error_text(error):
+    """Groq/Gemini error message without anything sensitive."""
+    try:
+        detail = json.loads(error.read().decode()).get("error", {})
+        message = detail.get("message") if isinstance(detail, dict) else str(detail)
+    except Exception:
+        message = error.reason
+    return f"HTTP {error.code}: {message}"
 
 
 def _call_provider(prompt, want_json, timeout):
@@ -236,30 +270,38 @@ def _call_provider(prompt, want_json, timeout):
             body["generationConfig"] = {"responseMimeType": "application/json"}
         headers = {"Content-Type": "application/json", "x-goog-api-key": setting("GEMINI_API_KEY")}
         reply = _post_json(url, body, headers, timeout)
+        LLM_STATUS.update(provider="Gemini", model=model)
         return reply["candidates"][0]["content"]["parts"][0]["text"]
 
     if setting("GROQ_API_KEY"):
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {setting('GROQ_API_KEY')}"}
-        last_error = None
+        errors = []
         # Groq retires or restricts models over time, so try the next one if a model is refused.
+        # If a model refuses JSON mode, ask again in plain text (json_from_text reads the reply).
         for model in dict.fromkeys([setting("GROQ_MODEL"), *GROQ_MODELS]):
             if not model:
                 continue
-            body = {"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
-            if model.startswith("openai/gpt-oss"):
-                body["reasoning_effort"] = "low"  # quick answers for short extraction tasks
-            if want_json:
-                body["response_format"] = {"type": "json_object"}
-            try:
-                reply = _post_json(url, body, headers, timeout)
-            except urllib.error.HTTPError as error:
-                if error.code in (400, 403, 404):  # model not available for this key -> next model
-                    last_error = error
-                    continue
-                raise
-            return reply["choices"][0]["message"]["content"]
-        raise RuntimeError(f"No Groq model accepted the request: {last_error}")
+            for json_mode in ([True, False] if want_json else [False]):
+                body = {"model": model, "messages": [{"role": "user", "content": prompt}], "temperature": 0.1}
+                if model.startswith("openai/gpt-oss"):
+                    body["reasoning_effort"] = "low"  # quick answers for short extraction tasks
+                if json_mode:
+                    body["response_format"] = {"type": "json_object"}
+                try:
+                    reply = _post_json(url, body, headers, timeout)
+                except urllib.error.HTTPError as error:
+                    errors.append(f"{model}: {_http_error_text(error)}")
+                    if error.code == 401:
+                        raise RuntimeError("Groq rejected the API key (HTTP 401)") from None
+                    if error.code in (403, 404):
+                        break  # this model is not available for the key -> next model
+                    if error.code in (400, 422):
+                        continue  # maybe JSON mode was refused -> try plain text, then the next model
+                    raise RuntimeError(errors[-1]) from None
+                LLM_STATUS.update(provider="Groq", model=model)
+                return reply["choices"][0]["message"]["content"]
+        raise RuntimeError("No Groq model accepted the request – " + " | ".join(errors[-3:]))
 
     raise RuntimeError("No LLM API key set")
 
@@ -286,7 +328,7 @@ Return ONLY JSON with keys: type (one of {[t for t, _ in TYPE_KEYWORDS]} or "unk
 road_id (from the list or null), location_text, severity (low/medium/high/critical),
 duration_min (integer), vehicle_id (from the list or null), confidence (0-1).
 Message: {text}"""
-    out = json.loads(call_llm(prompt, want_json=True))
+    out = json_from_text(call_llm(prompt, want_json=True))
 
     road_ids = set(data["roads"]["road_id"])
     dtype = out.get("type") if out.get("type") in BASE_SEVERITY else "unknown"

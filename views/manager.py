@@ -8,7 +8,7 @@ from streamlit_folium import st_folium
 from modules import issues, live_map, operations, store, ui
 from modules.data_loader import load_all
 from modules.graph_viz import build_graph, render_graph
-from modules.parser import SEVERITIES
+from modules.parser import SEVERITIES, llm_status
 from modules.report_ui import report_form
 
 SECTIONS = ["Live map", "Issues", "Deliveries", "Activity"]
@@ -360,6 +360,17 @@ if section == "Activity":
     for event in log.to_dict("records"):
         st.markdown(f"{icons.get(event['kind'], ':material/info:')} `{event['created_at']}` {event['text']}")
     st.divider()
+    ai = llm_status()
+    if not ai["available"]:
+        st.caption(":material/smart_toy: AI: no key set – rule-based mode (everything still works).")
+    elif ai["error"] and (not ai["ok_at"] or ai["error_at"] >= ai["ok_at"]):
+        wait = f" for about {ai['paused_sec'] // 60 + 1} more min" if ai["paused_sec"] else ""
+        st.caption(f":material/smart_toy: AI: last call failed at {ai['error_at']} – using rules{wait}. "
+                   f"Reason: {ai['error']}")
+    elif ai["ok_at"]:
+        st.caption(f":material/smart_toy: AI: {ai['provider']} · {ai['model']} · last answer at {ai['ok_at']}")
+    else:
+        st.caption(":material/smart_toy: AI: key found, not used yet in this session of the server.")
     with st.popover("Reset demo", icon=":material/restart_alt:"):
         st.write("Back to 09:00 with no issues. Everyone using the app sees the reset.")
         if st.button("Reset everything", type="primary"):

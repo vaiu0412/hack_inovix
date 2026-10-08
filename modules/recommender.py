@@ -14,7 +14,7 @@ import re
 
 from modules.data_loader import NOW_MIN, haversine_km, min_to_hhmm
 from modules.impact import CASCADE_STEP_MIN, as_list
-from modules.parser import call_llm, llm_available
+from modules.parser import call_llm, json_from_text, llm_available
 from modules.risk import score_risk
 
 URBAN_SPEED_KMPH = 25    # backup van average speed in the city
@@ -92,7 +92,7 @@ def polish_whys(whys):
               "Keep every number, name, vehicle id and time exactly. "
               'Return ONLY JSON: {"whys": [one string per line, same order]}\n\n' + numbered)
     try:
-        out = json.loads(call_llm(prompt, want_json=True)).get("whys", [])
+        out = json_from_text(call_llm(prompt, want_json=True)).get("whys", [])
     except Exception:
         return whys
     if len(out) != len(whys):

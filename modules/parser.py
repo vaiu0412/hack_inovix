@@ -157,8 +157,20 @@ LLM_COOLDOWN_SEC = 300  # after a failure, skip the LLM for 5 minutes
 _llm_paused_until = 0.0
 
 
+def setting(name, default=None):
+    """Read a key from environment variables, or from Streamlit secrets when deployed."""
+    value = os.getenv(name)
+    if value:
+        return value
+    try:
+        import streamlit as st
+        return st.secrets.get(name, default)
+    except Exception:  # no secrets file -> just use the default
+        return default
+
+
 def llm_available():
-    return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GROQ_API_KEY"))
+    return bool(setting("GEMINI_API_KEY") or setting("GROQ_API_KEY"))
 
 
 def call_llm(prompt, want_json=False, timeout=8):
@@ -178,26 +190,26 @@ def call_llm(prompt, want_json=False, timeout=8):
 
 
 def _call_provider(prompt, want_json, timeout):
-    if os.getenv("GEMINI_API_KEY"):
-        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    if setting("GEMINI_API_KEY"):
+        model = setting("GEMINI_MODEL", "gemini-2.5-flash")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         body = {"contents": [{"parts": [{"text": prompt}]}]}
         if want_json:
             body["generationConfig"] = {"responseMimeType": "application/json"}
-        headers = {"Content-Type": "application/json", "x-goog-api-key": os.environ["GEMINI_API_KEY"]}
+        headers = {"Content-Type": "application/json", "x-goog-api-key": setting("GEMINI_API_KEY")}
         reply = _post_json(url, body, headers, timeout)
         return reply["candidates"][0]["content"]["parts"][0]["text"]
 
-    if os.getenv("GROQ_API_KEY"):
+    if setting("GROQ_API_KEY"):
         url = "https://api.groq.com/openai/v1/chat/completions"
         body = {
-            "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            "model": setting("GROQ_MODEL", "llama-3.3-70b-versatile"),
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
         }
         if want_json:
             body["response_format"] = {"type": "json_object"}
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['GROQ_API_KEY']}"}
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {setting('GROQ_API_KEY')}"}
         reply = _post_json(url, body, headers, timeout)
         return reply["choices"][0]["message"]["content"]
 

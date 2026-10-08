@@ -135,7 +135,7 @@ if __name__ == "__main__":
 
     m = build(store.partners_df(), store.deliveries_df(), load_all()["roads"],
               disruptions=[{"type": "accident", "road_id": "R1", "road_name": "Avinashi Road"}],
-              detour_roads=["R9"], risk_labels={"D06": "Critical"}, selected="P1")
+              detour_roads=["R9"], risk_labels={"D06": "Critical"}, selected="DP101")
     html = m.get_root().render()
     assert "Murugan · V1" in html and "rp-pulse" in html
     print("map html:", len(html), "chars")

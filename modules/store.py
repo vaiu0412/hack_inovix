@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from modules.data_loader import DATA_DIR, NOW_MIN, hhmm_to_min, load_all, load_partners, nearest_place
+from modules.security import demo_hash
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS partners (
@@ -42,8 +43,18 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, kind TEXT, text TEXT, issue_id INTEGER);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS users (
+    user_id TEXT PRIMARY KEY, role TEXT NOT NULL CHECK (role IN ('manager', 'partner')),
+    display_name TEXT, dp_id TEXT NULL REFERENCES partners(partner_id),
+    password_hash TEXT NOT NULL, salt TEXT NOT NULL, is_active INTEGER DEFAULT 1, last_login TEXT);
+CREATE TABLE IF NOT EXISTS login_attempts (
+    login_key TEXT PRIMARY KEY, failures INTEGER DEFAULT 0, locked_until REAL DEFAULT 0);
 """
-TABLES = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events", "meta"]
+TABLES = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events", "meta",
+          "users", "login_attempts"]
+# Demo accounts (also listed in the README). Partners log in with their partner ID.
+DEMO_MANAGER = {"user_id": "manager", "display_name": "Operations Manager", "password": "ripple@123"}
+DEMO_PARTNER_PASSWORD = "partner@123"
 JSON_FIELDS = {"problem", "plan"}
 OPEN_ISSUE_STATUSES = ("new", "analysed")
 
@@ -86,8 +97,24 @@ def init_db():
     with connect() as conn:
         conn.executescript(SCHEMA)
         seeded = conn.execute("SELECT COUNT(*) FROM partners").fetchone()[0]
+        has_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        if seeded and not has_users:  # database from before logins existed: add the accounts only
+            _seed_users(conn)
     if not seeded:
         reset_demo()
+
+
+def _seed_users(conn):
+    """Manager + one login per partner. Only hashes are stored, never the passwords."""
+    conn.execute("DELETE FROM users")
+    rows = []
+    hash_hex, salt = demo_hash(DEMO_MANAGER["user_id"], DEMO_MANAGER["password"])
+    rows.append((DEMO_MANAGER["user_id"], "manager", DEMO_MANAGER["display_name"], None, hash_hex, salt))
+    for partner_id, name in conn.execute("SELECT partner_id, name FROM partners ORDER BY partner_id"):
+        hash_hex, salt = demo_hash(partner_id, DEMO_PARTNER_PASSWORD)
+        rows.append((partner_id, "partner", name, partner_id, hash_hex, salt))
+    conn.executemany("INSERT INTO users(user_id, role, display_name, dp_id, password_hash, salt) "
+                     "VALUES (?,?,?,?,?,?)", rows)
 
 
 def reset_demo():
@@ -112,6 +139,7 @@ def reset_demo():
             [(d.delivery_id, d.customer, d.address_area, d.lat, d.lng, d.vehicle_id, d.road_id,
               int(d.stop_order), d.planned_eta, d.deadline, d.priority, d.customer_phone, d.vehicle_id)
              for d in data["deliveries"].itertuples()])
+        _seed_users(conn)
         conn.execute("INSERT INTO events(created_at, kind, text) VALUES (?, 'system', ?)",
                      (now_stamp(), "Demo started: 6 partners, 30 deliveries, clock 09:00"))
         _bump(conn)
@@ -319,12 +347,12 @@ if __name__ == "__main__":
                     "next_eta"]].to_string(index=False))
     snap = snapshot()
     print({k: len(v) for k, v in snap.items()}, "| version", version())
-    issue_id = add_issue("P1", text="Avinashi road la accident")
+    issue_id = add_issue("DP101", text="Avinashi road la accident")
     update_issue(issue_id, problem={"type": "accident"}, status="analysed")
     assert get_issue(issue_id)["problem"]["type"] == "accident"
-    assert len(list_issues(OPEN_ISSUE_STATUSES)) == 1 and get_partner("P1")["open_issues"] == 1
+    assert len(list_issues(OPEN_ISSUE_STATUSES)) == 1 and get_partner("DP101")["open_issues"] == 1
     update_delivery("D01", status="delivered")
-    assert get_partner("P1")["delivered"] == 1 and len(snapshot()["deliveries"]) == 29
+    assert get_partner("DP101")["delivered"] == 1 and len(snapshot()["deliveries"]) == 29
     reset_demo()
     assert len(snapshot()["deliveries"]) == 30 and not list_issues()
     print("store OK")

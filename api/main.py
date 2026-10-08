@@ -4,7 +4,7 @@ Run:   uvicorn api.main:app --reload
 Docs:  http://localhost:8000/docs   (try every endpoint in the browser)
 
 Typical partner-app flow:
-  GET  /partners/P1                     -> profile, stops, unread messages
+  GET  /partners/DP101                     -> profile, stops, unread messages
   POST /issues/preview  (form + audio)  -> "we understood ..."
   POST /issues          (json)          -> stored; AI plan ready for the manager
 Typical manager-app flow:

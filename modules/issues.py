@@ -138,7 +138,7 @@ if __name__ == "__main__":
     for text, quick in [("Avinashi road la accident, full block, rendu mani neram aagum", None),
                         ("vandi puncture", None), ("", "traffic"), ("International road accident", None),
                         ("customer phone edukala, door locked", None)]:
-        result = preview("P1", text=text, quick_type=quick)
+        result = preview("DP101", text=text, quick_type=quick)
         p = result["problem"]
         print(f"{text or '[quick: ' + quick + ']':58} -> {p['summary']:55} needs_location={p['needs_location']}")
     print("issues OK")

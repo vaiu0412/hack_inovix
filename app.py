@@ -5,7 +5,7 @@ Two roles, one live database:
   Partner app – the delivery partner's phone screen: stops, voice-note problem reports
 
 Run:  streamlit run app.py
-Deep link for a partner's phone:  /partner?id=P1
+Deep link for a partner's phone:  /partner?id=DP101
 """
 import streamlit as st
 

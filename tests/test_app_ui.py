@@ -44,11 +44,11 @@ def test_every_screen_renders(db):
     for section in ["Live map", "Issues", "Deliveries", "Activity"]:
         open_page("views/manager.py", state={"section": section})
     open_page("views/partner.py")                       # "who's driving today?"
-    open_page("views/partner.py", query={"id": "P1"})
+    open_page("views/partner.py", query={"id": "DP101"})
 
 
 def test_report_accept_loop(db):
-    at = open_page("views/partner.py", query={"id": "P1"})
+    at = open_page("views/partner.py", query={"id": "DP101"})
     click(at, "Report a problem")
     at.text_area[0].set_value("avinasi rd la accident, full block, rendu mani neram").run()
     click(at, "Check")
@@ -61,7 +61,7 @@ def test_report_accept_loop(db):
     click(at, "Accept plan")
     assert store.get_issue(issue["issue_id"])["status"] == "accepted"
 
-    at = open_page("views/partner.py", query={"id": "P6"})  # backup partner Lakshmi
+    at = open_page("views/partner.py", query={"id": "DP106"})  # backup partner Lakshmi
     assert any("From operations" in m.value for m in at.markdown)
     click(at, "Delivered")
-    assert store.get_partner("P6")["delivered"] == 1
+    assert store.get_partner("DP106")["delivered"] == 1

@@ -22,14 +22,14 @@ def report(partner_id, text, quick_type=None):
 def test_voice_without_engines_falls_back_to_typing(db):
     assert transcribe(None) is None
     assert transcribe(b"not really audio") is None
-    seen = issues.preview("P1", audio=b"not really audio")
+    seen = issues.preview("DP101", audio=b"not really audio")
     assert seen["engine"] == "not understood" and seen["problem"] is None
 
 
 def test_report_is_understood_and_planned_immediately(db):
-    issue = db.get_issue(report("P1", ACCIDENT))
+    issue = db.get_issue(report("DP101", ACCIDENT))
     assert issue["status"] == "analysed"
-    assert issue["problem"]["road_id"] == "R1" and issue["problem"]["reported_by"] == "P1"
+    assert issue["problem"]["road_id"] == "R1" and issue["problem"]["reported_by"] == "DP101"
     plan = issue["plan"]
     assert plan["summary"]["affected_deliveries"] == 9
     assert plan["before_after"]["misses_before"] == 3 and plan["before_after"]["misses_after"] == 0
@@ -38,14 +38,14 @@ def test_report_is_understood_and_planned_immediately(db):
 
 
 def test_accept_updates_every_screen(db):
-    issue_id = report("P1", ACCIDENT)
+    issue_id = report("DP101", ACCIDENT)
     operations.accept(issue_id)
     deliveries = db.deliveries_df().set_index("delivery_id")
     assert deliveries.loc["D06", "vehicle_id"] == "V6"           # insulin moved to the backup van
     assert deliveries.loc["D06", "original_vehicle"] == "V1"
-    assert db.get_partner("P6")["status"] == "on_duty" and db.get_partner("P6")["pending"] == 2
-    assert any("D06" in m["text"] for m in db.messages_for("P6"))  # backup driver told
-    assert any("hand D06" in m["text"] for m in db.messages_for("P1"))
+    assert db.get_partner("DP106")["status"] == "on_duty" and db.get_partner("DP106")["pending"] == 2
+    assert any("D06" in m["text"] for m in db.messages_for("DP106"))  # backup driver told
+    assert any("hand D06" in m["text"] for m in db.messages_for("DP101"))
     assert "R1" not in db.vehicles_df().set_index("vehicle_id").loc["V1", "route_roads"]
     assert len(db.customer_messages()) > 0
     assert db.active_disruptions()[0]["road_id"] == "R1"
@@ -54,20 +54,20 @@ def test_accept_updates_every_screen(db):
 
 
 def test_later_plans_never_detour_through_a_blocked_road(db):
-    operations.accept(report("P1", ACCIDENT))
-    plan = db.get_issue(report("P3", "Heavy rain flooding at Trichy Road, 45 mins"))["plan"]
+    operations.accept(report("DP101", ACCIDENT))
+    plan = db.get_issue(report("DP103", "Heavy rain flooding at Trichy Road, 45 mins"))["plan"]
     assert all("R1" not in a.get("via_roads", []) for a in plan["actions"])
 
 
 def test_reject_tells_the_reporter(db):
-    issue_id = report("P2", "traffic jam on race course road 20 mins")
+    issue_id = report("DP102", "traffic jam on race course road 20 mins")
     operations.reject(issue_id, "Traffic is already clearing")
     assert db.get_issue(issue_id)["status"] == "rejected"
-    assert any("already clearing" in m["text"] for m in db.messages_for("P2"))
+    assert any("already clearing" in m["text"] for m in db.messages_for("DP102"))
 
 
 def test_unknown_place_asks_for_the_road_then_plans(db):
-    issue_id = report("P1", "International road accident")
+    issue_id = report("DP101", "International road accident")
     issue = db.get_issue(issue_id)
     assert issue["problem"]["needs_location"] and issue["plan"]["kind"] == "needs_location"
     plan = operations.edit_problem(issue_id, road_id="R1")
@@ -75,7 +75,7 @@ def test_unknown_place_asks_for_the_road_then_plans(db):
 
 
 def test_customer_not_available_moves_the_stop_to_the_end(db):
-    issue_id = report("P1", "", quick_type="customer_unavailable")
+    issue_id = report("DP101", "", quick_type="customer_unavailable")
     plan = db.get_issue(issue_id)["plan"]
     assert plan["kind"] == "single_stop" and plan["actions"][0]["deliveries_protected"] == ["D01"]
     operations.accept(issue_id)
@@ -85,4 +85,4 @@ def test_customer_not_available_moves_the_stop_to_the_end(db):
 
 def test_mark_delivered(db):
     operations.mark_delivered("D01", "Murugan")
-    assert db.get_partner("P1")["delivered"] == 1 and db.get_partner("P1")["pending"] == 5
+    assert db.get_partner("DP101")["delivered"] == 1 and db.get_partner("DP101")["pending"] == 5

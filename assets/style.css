@@ -19,6 +19,9 @@
 #MainMenu, footer, [data-testid="stAppDeployButton"], [data-testid="stMainMenu"],
 [data-testid="stHeaderActionElements"], [data-testid="stToolbarActions"] { display: none !important; }
 
+/* ---------- easy input: no "Press Enter / Ctrl+Enter to apply" hints (buttons do the work) */
+[data-testid="InputInstructions"] { display: none !important; }
+
 /* ---------- layout: 8px grid, page fade-in */
 [data-testid="stMainBlockContainer"] { padding-top: 3.5rem; padding-bottom: 3rem; animation: dp-fade .2s ease-out; }
 @keyframes dp-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -187,6 +190,11 @@
   [class*="st-key-card"] { padding: 16px !important; }
   .dp-header .t svg { display: none; }  /* the top bar already shows the logo on phones */
   iframe[title="streamlit_folium.st_folium"] { height: 420px !important; }
+  /* big, full-width buttons on phones (report tiles keep their grid size) */
+  .stButton button, .stFormSubmitButton button, .stLinkButton a, .stDownloadButton button { min-height: 48px; }
+  [data-testid="stElementContainer"]:not([class*="st-key-tile_"]) > .stButton,
+  [data-testid="stElementContainer"]:not([class*="st-key-tile_"]) > .stButton button,
+  .stFormSubmitButton, .stFormSubmitButton button { width: 100% !important; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dp-count, [data-testid="stMainBlockContainer"], .dp-s-critical i, .dp-skel { animation: none !important; }

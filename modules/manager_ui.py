@@ -450,9 +450,9 @@ def alert_steps(ctx, issue):
                 st.rerun()
             with st.popover("Modify", icon=":material/edit:"):
                 modify_form(ctx, issue, where="actions")
-            with st.popover("Reject", icon=":material/close:"):
+            with st.popover("Reject", icon=":material/close:"), st.form(f"reject_{issue['issue_id']}", border=False):
                 reason = st.text_input("Reason", key=f"why_{issue['issue_id']}", placeholder="Road clear")
-                if st.button("Reject alert", key=f"reject_{issue['issue_id']}", width="stretch"):
+                if st.form_submit_button("Reject alert", width="stretch"):  # Enter also submits
                     operations.reject(issue["issue_id"], reason or "Not needed",
                                       st.session_state.get("display_name", "Branch admin"), branch_id=ctx["branch_id"])
                     st.toast("Alert rejected.")

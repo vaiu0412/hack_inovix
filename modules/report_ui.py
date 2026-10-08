@@ -78,8 +78,11 @@ def report_form(partner_id, branch_id, prefix="report", source="partner"):
     engines = available_engines()
     st.caption(f"Tamil, English or both · {engines[0] if engines else 'type one line'}")
 
-    if st.button("Check", type="primary", width="stretch", key=_key(prefix, "check"), icon=":material/fact_check:",
-                 disabled=not (audio or text.strip() or quick)):
+    # always clickable: a typed line is committed when the field loses focus, so no Ctrl+Enter is needed
+    if st.button("Check", type="primary", width="stretch", key=_key(prefix, "check"), icon=":material/fact_check:"):
+        if not (audio or text.strip() or quick):
+            st.warning("Tap a type, record or type.", icon=":material/info:")
+            return None
         audio_bytes = audio.getvalue() if audio else None
         ui.pause_live_updates()  # keep the preview on screen until it is sent
         with st.spinner("Listening…"):

@@ -1,0 +1,42 @@
+place_id,name,tamil,aliases,kind,lat,lng,road_id
+L01,Avinashi Road,அவிநாசி சாலை,avinashi|avinasi|avanashi|avinashi rd|avinashi salai,road,11.0168,76.9955,R1
+L02,Trichy Road,திருச்சி சாலை,trichy|tiruchi road|trichy rd|thiruchi road,road,10.9958,76.9945,R2
+L03,Mettupalayam Road,மேட்டுப்பாளையம் சாலை,mettupalayam|mtp road|mettupalayam rd|metupalayam,road,11.0300,76.9470,R3
+L04,Sathy Road,சத்தி சாலை,sathy|sathyamangalam road|sathy rd|sathi road,road,11.0400,76.9760,R4
+L05,Pollachi Road,பொள்ளாச்சி சாலை,pollachi|pollachi rd|polachi road,road,10.9750,76.9640,R5
+L06,DB Road,டி.பி. சாலை,db road|d b road|diwan bahadur road|db rd,road,11.0094,76.9568,R6
+L07,100 Feet Road,நூறு அடி சாலை,100 feet road|100 ft road|hundred feet road|100 adi road|100 அடி சாலை,road,11.0185,76.9645,R7
+L08,Race Course Road,ரேஸ் கோர்ஸ் சாலை,race course road|racecourse road|race course rd,road,11.0020,76.9770,R8
+L09,Peelamedu–Hope College Stretch,பீளமேடு ஹோப் காலேஜ்,peelamedu stretch|hope college stretch|peelamedu road,road,11.0200,77.0060,R9
+L10,Ukkadam–Town Hall Road,உக்கடம் டவுன் ஹால் சாலை,ukkadam road|town hall road|ukkadam town hall,road,10.9935,76.9608,R10
+L11,Gandhipuram,காந்திபுரம்,gandhi puram|gandipuram|ganthipuram,area,11.0168,76.9663,R7
+L12,Cross Cut Road,கிராஸ் கட் சாலை,cross cut|crosscut road,area,11.0150,76.9630,R7
+L13,RS Puram,ஆர்.எஸ்.புரம்,r s puram|rs puram|r.s. puram|rspuram|rathinasabapathy puram,area,11.0090,76.9530,R6
+L14,Peelamedu,பீளமேடு,pilamedu|peelamedu|peela medu,area,11.0200,77.0060,R9
+L15,Hope College,ஹோப் காலேஜ்,hope college|hopes college|hopes,area,11.0232,77.0170,R9
+L16,PSG Tech,பி.எஸ்.ஜி. டெக்,psg tech|psg college|psg college of technology|psg,landmark,11.0245,77.0025,R1
+L17,PSG Hospitals,பி.எஸ்.ஜி. மருத்துவமனை,psg hospital|psg hospitals,landmark,11.0230,77.0070,R1
+L18,KMCH,கே.எம்.சி.எச்.,kmch|kovai medical center|kovai medical centre|kmch hospital,landmark,11.0312,77.0375,R1
+L19,Codissia,கொடிசியா,codissia|codisia|codissia trade fair,landmark,11.0290,77.0270,R1
+L20,Lakshmi Mills,லட்சுமி மில்ஸ்,lakshmi mills|laxmi mills|lakshmimills,area,11.0102,76.9845,R1
+L21,Nava India,நவ இந்தியா,nava india|navaindia|nava india signal,area,11.0168,76.9955,R1
+L22,Uppilipalayam,உப்பிலிபாளையம்,uppilipalayam|upilipalayam,area,11.0045,76.9700,R1
+L23,Coimbatore Airport,கோவை விமான நிலையம்,airport|civil aerodrome|coimbatore airport,landmark,11.0300,77.0430,R1
+L24,Saibaba Colony,சாய்பாபா காலனி,saibaba colony|sai baba colony|saibaba,area,11.0245,76.9530,R3
+L25,Kavundampalayam,கவுண்டம்பாளையம்,kavundampalayam|goundampalayam|kavundampalayam,area,11.0300,76.9470,R3
+L26,Thudiyalur,துடியலூர்,thudiyalur|thudialur|tudiyalur,area,11.0700,76.9420,R3
+L27,Ganapathy,கணபதி,ganapathy|ganapathi|ganapathy puthur,area,11.0400,76.9760,R4
+L28,Saravanampatti,சரவணம்பட்டி,saravanampatti|saravanampatty|saravanampati,area,11.0790,76.9990,R4
+L29,Chinnavedampatti,சின்னவேடம்பட்டி,chinnavedampatti|chinna vedampatti|chinnavedampatty,area,11.0600,76.9880,R4
+L30,KGiSL IT Park,கே.ஜி.ஐ.எஸ்.எல்.,kgisl|kgisl tech park|saravanampatti it park,landmark,11.0790,76.9990,R4
+L31,Ukkadam,உக்கடம்,ukkadam|ukadam|ukkadam bus stand,area,10.9905,76.9612,R10
+L32,Town Hall,டவுன் ஹால்,town hall|townhall|town hal,area,10.9945,76.9608,R10
+L33,Coimbatore Junction,கோவை ரயில் நிலையம்,railway station|coimbatore junction|kovai junction,landmark,10.9970,76.9670,R10
+L34,Kurichi,குறிச்சி,kurichi|kurichy,area,10.9750,76.9640,R5
+L35,Sundarapuram,சுந்தராபுரம்,sundarapuram|sundharapuram|sundarapuram signal,area,10.9580,76.9700,R5
+L36,Eachanari,ஈச்சனாரி,eachanari|echanari|eachanari temple,area,10.9400,76.9770,R5
+L37,Sungam,சுங்கம்,sungam|sungam junction,area,10.9965,76.9800,R2
+L38,Ramanathapuram,ராமநாதபுரம்,ramanathapuram|ramnathapuram|ramanathapuram signal,area,10.9958,76.9945,R2
+L39,Puliakulam,புலியகுளம்,puliakulam|puliyakulam,area,10.9990,77.0000,R2
+L40,Singanallur,சிங்காநல்லூர்,singanallur|singanalur|singa nallur,area,10.9998,77.0310,R2
+L41,Race Course,ரேஸ் கோர்ஸ்,race course|racecourse|race cource,area,11.0020,76.9770,R8

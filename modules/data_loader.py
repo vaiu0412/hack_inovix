@@ -1,15 +1,16 @@
-"""Load the demo data (roads, vehicles, deliveries) and shared helpers.
+"""Load the demo data (roads, vehicles, deliveries, partners, places) and shared helpers.
 
 Times are handled as "minutes since midnight" so maths stays simple.
 The app uses a FIXED simulated clock: now = 09:00 today.
+No Streamlit in here, so the same code also powers the mobile API.
 """
 import json
 import math
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
-import streamlit as st
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -60,9 +61,16 @@ def _split_pipe(text):
     return [part.strip() for part in text.split("|") if part.strip()]
 
 
-@st.cache_data
 def load_all():
-    """Return {'roads', 'vehicles', 'deliveries'} DataFrames with parsed columns."""
+    """Return {'roads', 'vehicles', 'deliveries'} DataFrames with parsed columns.
+
+    Files are read once; every caller gets its own copy, so changing it is safe.
+    """
+    return {name: df.copy() for name, df in _read_csvs().items()}
+
+
+@lru_cache(maxsize=1)
+def _read_csvs():
     roads = pd.read_csv(DATA_DIR / "roads.csv")
     roads["aliases"] = roads["aliases"].apply(lambda s: [a.lower() for a in _split_pipe(s)])
     roads["points"] = roads["points"].apply(json.loads)
@@ -79,6 +87,36 @@ def load_all():
     return {"roads": roads, "vehicles": vehicles, "deliveries": deliveries}
 
 
+@lru_cache(maxsize=1)
+def _read_partners():
+    return pd.read_csv(DATA_DIR / "partners.csv")
+
+
+def load_partners():
+    """Delivery partners: one per vehicle (the backup van's driver is on standby)."""
+    return _read_partners().copy()
+
+
+@lru_cache(maxsize=1)
+def _read_places():
+    places = pd.read_csv(DATA_DIR / "places.csv")
+    places["aliases"] = places["aliases"].apply(lambda s: [a.lower() for a in _split_pipe(s)])
+    return places
+
+
+def load_places():
+    """Canonical Coimbatore places (roads, areas, landmarks) with aliases and Tamil names."""
+    return _read_places().copy()
+
+
+def nearest_place(lat, lng, kinds=("area", "landmark")):
+    """Name of the closest known area/landmark, e.g. for 'Murugan is near RS Puram'."""
+    places = _read_places()
+    places = places[places["kind"].isin(kinds)]
+    distances = places.apply(lambda p: haversine_km(lat, lng, p["lat"], p["lng"]), axis=1)
+    return places.loc[distances.idxmin(), "name"]
+
+
 if __name__ == "__main__":
     data = load_all()
     for name, df in data.items():
@@ -92,4 +130,9 @@ if __name__ == "__main__":
         assert d["road_id"] in routes[d["vehicle_id"]], d["delivery_id"]
     print("Road lengths (km):", dict(zip(data["roads"]["road_id"], data["roads"]["length_km"])))
     print("Clock:", now_label())
+    partners, places = load_partners(), load_places()
+    assert set(partners["vehicle_id"]) == set(data["vehicles"]["vehicle_id"])
+    assert set(places["road_id"]) <= set(data["roads"]["road_id"])
+    print(f"partners: {len(partners)} | places: {len(places)} | V1 is near:",
+          nearest_place(11.0080, 76.9480))
     print("data_loader OK")

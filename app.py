@@ -222,13 +222,13 @@ elif page == "Report Disruption":
                    "45 mins* · *Protest at Town Hall for 1.5 hr*")
     with right:
         st.markdown("**…or fill the form**")
-        with st.form("structured"):
-            f_type = st.selectbox("Type", TYPES, format_func=lambda t: t.replace("_", " ").title())
-            f_road = st.selectbox("Location / road", ["—"] + list(road_names), format_func=lambda r: road_names.get(r, "—"))
-            f_sev = st.select_slider("Severity", SEVERITIES, value="high")
-            f_dur = st.number_input("Duration (min)", 0, 600, 60, step=15)
-            f_veh = st.selectbox("Vehicle (for breakdowns)", ["—"] + vehicle_ids)
-            if st.form_submit_button("Use these details"):
+        with st.container(border=True):
+            f_type = st.selectbox("Type", TYPES, key="f_type", format_func=lambda t: t.replace("_", " ").title())
+            f_road = st.selectbox("Location / road", ["—"] + list(road_names), key="f_road", format_func=lambda r: road_names.get(r, "—"))
+            f_sev = st.select_slider("Severity", SEVERITIES, value="high", key="f_sev")
+            f_dur = st.number_input("Duration (min)", 0, 600, 60, step=15, key="f_dur")
+            f_veh = st.selectbox("Vehicle (for breakdowns)", ["—"] + vehicle_ids, key="f_veh")
+            if st.button("Use these details"):
                 st.session_state.parsed = {
                     "type": f_type, "road_id": None if f_road == "—" else f_road,
                     "road_name": road_names.get(f_road), "location_text": road_names.get(f_road, ""),

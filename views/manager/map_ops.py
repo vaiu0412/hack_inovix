@@ -1,15 +1,15 @@
-"""Map & Operations: where every delivery partner is; tap one for details."""
+"""Live Map: every partner, stop and alert on real roads. Tap a vehicle for details."""
 import streamlit as st
 
 from modules import guards, manager_ui as mui, ui
 
 guards.require_role("branch_admin")
-ui.header("Map & Operations", "Tap a delivery partner on the map to see their deliveries.")
+ui.header("Live Map", "Tap a vehicle for details.")
 ui.live_updates()
 ctx = mui.context()
 mui.alert_banner(ctx)
 
-map_col, side_col = st.columns([2.1, 1], gap="medium")
+map_col, side_col = st.columns([2.3, 1], gap="medium")
 with map_col:
     mui.live_map_view(ctx)
 with side_col:

@@ -6,6 +6,8 @@ The session is re-validated against the database on every run.
 
 Run:  streamlit run app.py
 """
+from pathlib import Path
+
 import streamlit as st
 
 from modules import guards, ui
@@ -19,10 +21,17 @@ role = user["role"] if user else None
 ui.setup_page(layout="centered" if role == "partner" else "wide", role=role)
 guards.flush_cookie_ops()
 
+def _to_sign_in():
+    st.switch_page("views/login.py")
+
+
 if user is None:
-    # the admin console lives at /console (file stem = URL path); the public page never links to it
+    # the admin console lives at /console (file stem = URL path); the public page never links to it.
+    # Links to signed-in pages (e.g. after signing out on /map_ops) go to the sign-in page, not "Page not found".
+    known = {Path(path).stem for path in (*S.values(), *B.values(), *P.values())}
     st.navigation([st.Page("views/login.py", title="Sign in", icon=":material/login:", default=True),
-                   st.Page("views/console.py", title="Console", icon=":material/lock:")],
+                   st.Page("views/console.py", title="Console", icon=":material/lock:")]
+                  + [st.Page(_to_sign_in, title="Sign in", url_path=stem) for stem in sorted(known)],
                   position="hidden").run()
     st.stop()
 

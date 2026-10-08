@@ -18,6 +18,7 @@ import pandas as pd
 
 from modules.data_loader import (DATA_DIR, NOW_MIN, hhmm_to_min, load_all, load_branches, load_partners,
                                  nearest_place)
+from modules import geometry
 from modules.security import demo_hash
 
 SCHEMA_VERSION = 4
@@ -64,6 +65,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS otp_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, purpose TEXT NOT NULL, code_hash TEXT NOT NULL,
     salt TEXT NOT NULL, expires_at REAL, used INTEGER DEFAULT 0, attempts INTEGER DEFAULT 0, created_at REAL);
+CREATE TABLE IF NOT EXISTS route_geometry (key TEXT PRIMARY KEY, points TEXT NOT NULL, source TEXT, meta TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, actor_user_id TEXT, action TEXT, target TEXT,
     details_json TEXT, branch_id TEXT);
@@ -184,6 +186,9 @@ def init_db():
             _migrate_v3(conn)
         if current < 4:
             _migrate_v4(conn)
+        stamp = conn.execute("SELECT value FROM meta WHERE key = 'geometry_stamp'").fetchone()
+        if not stamp or stamp["value"] != geometry.cache_stamp():  # the shapes file changed: reload it
+            _seed_geometry(conn)
 
 
 def _seed_reference(conn):
@@ -261,6 +266,34 @@ def _migrate_v4(conn):
     _set_version(conn, 4)
 
 
+def _seed_geometry(conn):
+    """Real road shapes: the committed cache file first; anything missing is fetched from OSRM once
+    (only when online), else the map falls back to the stored waypoints. Kept across demo resets."""
+    cache = geometry.load_cache_file()
+    have = {r[0] for r in conn.execute("SELECT key FROM route_geometry")}
+    data = load_all()
+    wanted = {f"road:{r.road_id}": ("route", [tuple(p) for p in r.points]) for r in data["roads"].itertuples()}
+    wanted.update({f"snap:{v.vehicle_id}": ("nearest", (v.current_lat, v.current_lng))
+                   for v in data["vehicles"].itertuples()})
+    missing = {k: v for k, v in wanted.items() if k not in cache and k not in have}
+    if missing and geometry.online():
+        geometry.fetch_missing(cache, dict(list(missing.items())[:1]), pause=0, log=lambda *_: None)
+        if all(k in cache for k in list(missing)[:1]):  # reachable: fetch the rest, else don't wait on it
+            geometry.fetch_missing(cache, missing, pause=0.3, log=lambda *_: None)
+    conn.executemany("INSERT OR REPLACE INTO route_geometry(key, points, source, meta) VALUES (?,?,?,?)",
+                     [(k, json.dumps(v["points"]), v.get("source", "osrm"),
+                       json.dumps({m: v[m] for m in ("moved_m", "street") if m in v}))
+                      for k, v in cache.items() if k not in have or k in geometry.load_cache_file()])
+    conn.execute("INSERT INTO meta(key, value) VALUES ('geometry_stamp', ?) ON CONFLICT(key) DO UPDATE "
+                 "SET value = excluded.value", (geometry.cache_stamp(),))
+
+
+def route_geometry():
+    """{key: [[lat, lng], ...]} – real road shapes for the map (never fetched at demo time)."""
+    with connect() as conn:
+        return {r["key"]: json.loads(r["points"]) for r in conn.execute("SELECT key, points FROM route_geometry")}
+
+
 def _set_version(conn, version):
     conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE "
                  "SET value = excluded.value", (str(version),))
@@ -294,6 +327,7 @@ def reset_demo():
               int(d.stop_order), d.planned_eta, d.deadline, d.priority, d.customer_phone, d.vehicle_id,
               branch_of[d.vehicle_id]) for d in data["deliveries"].itertuples()])
         _seed_users(conn)
+        _seed_geometry(conn)
         for branch_id in partners["branch_id"].unique():
             conn.execute("INSERT INTO events(created_at, kind, text, branch_id) VALUES (?, 'system', ?, ?)",
                          (now_stamp(), "Day started at 09:00", branch_id))
@@ -386,11 +420,11 @@ def partners_df(branch_id=None):
             "next_road": nxt["road_id"] if nxt is not None else (p.route_roads.split("|")[0] if p.route_roads else None),
             "open_issues": int(open_by_partner.get(p.partner_id, 0)),
             "shift": f"{p.shift_start}–{p.shift_end}", "languages": (p.languages or "").replace("|", ", "),
-            "rating": p.rating,
+            "rating": p.rating, "route_roads": p.route_roads or "",
         })
     columns = ["partner_id", "name", "phone", "email", "status", "account_active", "branch_id", "vehicle_id", "reg_no",
                "vehicle_type", "area", "lat", "lng", "assigned", "delivered", "pending", "urgent", "next_stop",
-               "next_eta", "next_road", "open_issues", "shift", "languages", "rating"]
+               "next_eta", "next_road", "open_issues", "shift", "languages", "rating", "route_roads"]
     return pd.DataFrame(rows, columns=columns)
 
 

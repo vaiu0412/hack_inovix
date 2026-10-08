@@ -18,12 +18,14 @@ def context():
     branch = guards.branch_id()
     roads = load_all()["roads"]
     partners = store.partners_df(branch)
-    return {
+    ctx = {
         "roads": roads, "road_names": dict(zip(roads["road_id"], roads["name"])), "partners": partners,
         "partner_names": dict(zip(partners["partner_id"], partners["name"])),
         "open_issues": store.list_issues(store.OPEN_ISSUE_STATUSES, branch_id=branch),
         "branch_id": branch, "actor": guards.current_user(),
     }
+    ctx["states"] = partner_states(ctx)
+    return ctx
 
 
 def go(page_key):
@@ -79,79 +81,138 @@ def ai_status_line():
 
 
 # ---------------------------------------------------------------- map + partners
-def live_map_view(ctx, height=500, key="live_map"):
-    partners, open_issues = ctx["partners"], ctx["open_issues"]
+RISK_ORDER = {"Critical": 3, "High": 2, "Medium": 1, "Low": 0}
+
+
+def partner_states(ctx):
+    """partner_id -> normal / delayed / critical / available / break / off (same colours everywhere).
+    Critical if they reported an open alert or carry a Critical delivery; Delayed for High/Medium risk."""
+    worst = {}
+    for issue in ctx["open_issues"]:
+        for row in (issue.get("plan") or {}).get("risk", []):
+            if RISK_ORDER.get(row["risk_label"], 0) > RISK_ORDER.get(worst.get(row["vehicle_id"]), -1):
+                worst[row["vehicle_id"]] = row["risk_label"]
+    reporters = {i["partner_id"] for i in ctx["open_issues"]}
+    states = {}
+    for p in ctx["partners"].to_dict("records"):
+        state = ui.partner_state(p["status"], worst.get(p["vehicle_id"]))
+        if p["partner_id"] in reporters and state in ("normal", "delayed"):
+            state = "critical"
+        states[p["partner_id"]] = state
+    return states
+
+
+def map_layers(ctx):
+    """Blocked roads (open + accepted alerts), detours and risk labels for this branch."""
+    branch, open_issues = ctx["branch_id"], ctx["open_issues"]
     plans = [i["plan"] for i in open_issues if i.get("plan")]
-    branch = ctx["branch_id"]
     disruptions = store.active_disruptions(branch) + [p["disruption"] for p in plans if p.get("disruption")]
     detours = {r for p in plans for r in p.get("via_roads", [])}
     detours |= {r for i in store.list_issues(("accepted",), branch_id=branch)
                 for r in (i.get("plan") or {}).get("via_roads", [])}
-    fmap = live_map.build(partners, store.deliveries_df(branch_id=branch), ctx["roads"], disruptions, detours,
-                          risk_labels_now(open_issues), selected=st.session_state.get("selected_partner"),
-                          dark=ui.is_dark())
-    out = st_folium(fmap, height=height, use_container_width=True, key=key,
-                    returned_objects=["last_object_clicked_tooltip"])
+    return disruptions, detours, risk_labels_now(open_issues)
+
+
+def live_map_view(ctx, height=620, key="live_map", filters=True):
+    """Filters above the map, a shimmer skeleton while it loads, click a vehicle -> selected partner."""
+    partners = ctx["partners"]
+    states = ctx.get("states") or partner_states(ctx)
+    view = partners
+    focus = False
+    if filters:
+        with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+            status_pick = st.pills("Status", ["normal", "delayed", "critical", "available", "break"],
+                                   selection_mode="multi", format_func=ui.status_text, key=f"{key}_status",
+                                   label_visibility="collapsed")
+            kinds = sorted(partners["vehicle_type"].unique())
+            kind_pick = st.pills("Vehicle", kinds, selection_mode="multi", key=f"{key}_kind",
+                                 format_func=lambda k: f"{ui.VEHICLE_EMOJI.get(k, '')} {k.title()}",
+                                 label_visibility="collapsed")
+            names = ctx["road_names"]
+            road_pick = st.selectbox("Route", [None] + list(names), key=f"{key}_road", label_visibility="collapsed",
+                                     format_func=lambda r: "All routes" if r is None else names[r], width=200)
+            focus = st.toggle("Focus alerts", key=f"{key}_focus", disabled=not ctx["open_issues"])
+        if status_pick:
+            view = view[view["partner_id"].map(states).isin(status_pick)]
+        if kind_pick:
+            view = view[view["vehicle_type"].isin(kind_pick)]
+        if road_pick:
+            view = view[view["route_roads"].fillna("").str.split("|").apply(lambda rs: road_pick in rs)]
+    deliveries = store.deliveries_df(branch_id=ctx["branch_id"])
+    deliveries = deliveries[deliveries["vehicle_id"].isin(view["vehicle_id"])]
+    disruptions, detours, risk = map_layers(ctx)
+
+    holder = st.empty()
+    holder.markdown(ui.skeleton(height), unsafe_allow_html=True)
+    fmap = live_map.build(view, deliveries, ctx["roads"], disruptions, detours, risk,
+                          selected=st.session_state.get("selected_partner"), states=states,
+                          focus=True if focus else None, dark=ui.is_dark())
+    with holder.container():
+        out = st_folium(fmap, height=height, use_container_width=True, key=key,
+                        returned_objects=["last_object_clicked_tooltip"])
     tip = (out or {}).get("last_object_clicked_tooltip")
-    by_tip = {live_map.partner_tooltip(p): p["partner_id"] for p in partners.to_dict("records")}
+    by_tip = {live_map.partner_tooltip(p, states.get(p["partner_id"])): p["partner_id"]
+              for p in partners.to_dict("records")}
     if tip and tip != st.session_state.get(f"_last_tip_{key}"):
         st.session_state[f"_last_tip_{key}"] = tip
         if tip in by_tip and by_tip[tip] != st.session_state.get("selected_partner"):
             st.session_state["selected_partner"] = by_tip[tip]
             st.rerun()
-    st.caption("Tap a partner (initials) for details. Red dashed = blocked road · green = detour · "
-               "coloured dots = deliveries at risk.")
 
 
 def partner_picker(ctx):
     partners = ctx["partners"]
     selected = st.session_state.get("selected_partner")
     options = partners["partner_id"].tolist()
-    vehicles = dict(zip(partners["partner_id"], partners["vehicle_id"]))
-    pick = st.selectbox("Delivery Partner", options, index=options.index(selected) if selected in options else None,
-                        format_func=lambda pid: f"{ctx['partner_names'][pid]} · {pid} · {vehicles[pid]}",
-                        placeholder="Choose a delivery partner", label_visibility="collapsed")
+    pick = st.selectbox("Find partner", options, index=options.index(selected) if selected in options else None,
+                        format_func=lambda pid: f"{pid} · {ctx['partner_names'][pid]}",
+                        placeholder="Find partner", label_visibility="collapsed")
     if pick and pick != selected:
         st.session_state["selected_partner"] = pick
         st.rerun()
 
 
 def partner_panel(ctx, pid):
+    """Right-side details for one partner: short labels, numbers, status colour."""
     p = store.get_partner(pid, ctx["branch_id"]) if pid else None
     if p is None:
-        st.info("Tap a delivery partner on the map or in the table.", icon=":material/touch_app:")
+        with ui.card("partner_panel"):
+            ui.empty_state("touch_app", "Tap a vehicle on the map.")
         return
-    with st.container(border=True):
-        st.markdown(ui.person(p["name"], f"{p['partner_id']} · {p['vehicle_type'].title()} · {p['reg_no']} · "
-                                         f"near {p['area']}", ui.STATUS[ui.partner_state(p["status"])][2]),
-                    unsafe_allow_html=True)
+    states = ctx.get("states") or partner_states(ctx)
+    state = states.get(pid, "normal")
+    mine = [i for i in ctx["open_issues"] if i["partner_id"] == pid]
+    route = " → ".join(ctx["road_names"].get(r, r) for r in str(p.get("route_roads") or "").split("|") if r)
+    with ui.card("partner_panel"):
+        st.markdown(ui.person(p["name"], f"{p['partner_id']} · {ui.VEHICLE_EMOJI.get(p['vehicle_type'], '')} "
+                                         f"{p['vehicle_type'].title()}", ui.STATUS[state][2])
+                    + f"<div style='margin-top:10px'>{ui.pill_html(state)}</div>", unsafe_allow_html=True)
         st.markdown(ui.kv([
-            ("Status", ui.partner_badge(p["status"])),
-            ("Phone", f"<a href='tel:{escape(p['phone'])}'>{escape(p['phone'])}</a>"),
-            ("Deliveries", f"{p['pending']} pending · {p['delivered']} done"),
-            ("Urgent", f"{p['urgent']} medical/perishable"),
-            ("Shift", escape(p["shift"])),
-            ("Rating", f"{p['rating']:.1f} / 5"),
+            ("Vehicle", f"{escape(p['vehicle_id'])} · {escape(p['reg_no'])}"),
+            ("Location", escape(p["area"])),
+            ("Deliveries", f"{p['delivered']} done · {p['pending']} left"),
+            ("Next ETA", escape(str(p["next_eta"]))),
+            ("Route", escape(route or "—")),
+            ("Issue", ui.pill_html("critical", f"#{mine[0]['issue_id']}") if mine else "None"),
         ]), unsafe_allow_html=True)
-        st.caption(f"Next stop: {p['next_stop']} · ETA {p['next_eta']} · speaks {p['languages']}")
+        call, review = st.columns(2)
+        call.link_button("Call", f"tel:{p['phone']}", icon=":material/call:", width="stretch")
+        if mine and review.button("Review", key=f"review_{pid}", icon=":material/report:", width="stretch",
+                                  type="primary"):
+            go("disruptions")
         stops = store.deliveries_df(p["vehicle_id"], branch_id=ctx["branch_id"])
         if len(stops):
-            view = stops[["stop_order", "customer", "address_area", "priority", "planned_eta", "deadline", "status"]]
-            st.dataframe(view.rename(columns={"stop_order": "#", "customer": "Customer", "address_area": "Area",
-                                              "priority": "Priority", "planned_eta": "ETA", "deadline": "Due",
-                                              "status": "Status"}),
-                         hide_index=True, width="stretch", height=min(38 * (len(view) + 1) + 3, 280))
-        else:
-            st.caption("No deliveries assigned.")
-        mine = [i for i in ctx["open_issues"] if i["partner_id"] == pid]
-        if mine and st.button(f"Review issue #{mine[0]['issue_id']}", key=f"review_{pid}",
-                              icon=":material/report:", width="stretch"):
-            go("disruptions")
-        active = st.toggle("Account active", value=bool(p["account_active"]), key=f"partner_active_{pid}",
-                           help="A deactivated delivery partner is signed out and cannot sign in.")
+            risk = risk_labels_now(ctx["open_issues"])
+            status = stops.apply(lambda d: ui.status_text("done") if d["status"] == "delivered"
+                                 else ui.status_text(ui.risk_state(risk.get(d["delivery_id"], "Low"))), axis=1)
+            view = stops.assign(Status=status)
+            st.dataframe(view[["stop_order", "customer", "planned_eta", "deadline", "Status"]].rename(
+                columns={"stop_order": "#", "customer": "Customer", "planned_eta": "ETA", "deadline": "Due"}),
+                hide_index=True, width="stretch", height=min(36 * (len(view) + 1) + 3, 260))
+        active = st.toggle("Account active", value=bool(p["account_active"]), key=f"partner_active_{pid}")
         if active != bool(p["account_active"]):
             admin.set_partner_active(ctx["actor"], pid, active)
-            st.toast(f"{p['name']} {'activated' if active else 'deactivated'}")
+            st.toast(f"{p['name']} {'activated' if active else 'deactivated'}.")
             st.rerun()
 
 

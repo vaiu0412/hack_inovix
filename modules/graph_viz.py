@@ -64,6 +64,20 @@ def build_graph(disruption, risk_df, data):
     return g
 
 
+def layered_positions(g):
+    """x = layer, y = evenly spread in insertion order (keeps each vehicle's stops together).
+    Vehicles, roads and the disruption sit at the average height of their children."""
+    pos = {}
+    leaves = [n for n in g.nodes if g.nodes[n]["layer"] == 4]
+    for i, node in enumerate(leaves):
+        pos[node] = (4, -i)
+    for layer in [3, 2, 1, 0]:
+        for node in [n for n in g.nodes if g.nodes[n]["layer"] == layer]:
+            ys = [pos[c][1] for c in g.successors(node) if c in pos]
+            pos[node] = (layer, sum(ys) / len(ys) if ys else 0)
+    return pos
+
+
 def render_graph(g, height=None):
     """Plotly figure of the layered graph."""
     fig = go.Figure()
@@ -72,10 +86,7 @@ def render_graph(g, height=None):
         fig.update_layout(height=200, xaxis_visible=False, yaxis_visible=False)
         return fig
 
-    pos = nx.multipartite_layout(g, subset_key="layer", align="vertical")
-    # spread layers evenly left->right; flip y so the first node is on top
-    for node, (x, y) in pos.items():
-        pos[node] = (g.nodes[node]["layer"], -y)
+    pos = layered_positions(g)
 
     edge_x, edge_y = [], []
     for a, b in g.edges():
@@ -107,11 +118,11 @@ def render_graph(g, height=None):
     n_rows = max(sum(1 for n in nodes if g.nodes[n]["layer"] == layer) for layer in range(5))
     fig.update_layout(
         height=height or max(380, 42 * n_rows + 80),
-        margin=dict(l=10, r=10, t=40, b=10),
+        margin=dict(l=10, r=10, t=40, b=40),
         xaxis=dict(visible=False, range=[-0.4, 5.6]),
         yaxis=dict(visible=False),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", y=1.08, x=0),
+        legend=dict(orientation="h", y=-0.02, x=0, yanchor="top"),
         hoverlabel=dict(align="left"),
     )
     for i, title in enumerate(LAYER_TITLES):

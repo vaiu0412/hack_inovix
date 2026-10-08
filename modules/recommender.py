@@ -143,9 +143,11 @@ def recommend(impact, disruption, data, polish=True):
         saved = int(row["new_eta_min"] - eta)
         lateness = (f"misses its {row['deadline']} deadline by {-row['slack_min']} min"
                     if row["slack_min"] < 0 else f"has only {row['slack_min']} min slack")
-        where = "idle" if len(backup_jobs) == 1 else "already on a backup run"
-        why = (f"{row['customer']} ({row['priority']}) {lateness}; backup {backup['type']} "
-               f"{backup.name} ({backup['reg_no']}) is {idle_km:.1f} km away and {where}, "
+        if len(backup_jobs) == 1:
+            where = f"backup {backup['type']} {backup.name} ({backup['reg_no']}) is {idle_km:.1f} km away and idle"
+        else:
+            where = f"after its previous drop, backup {backup.name} is {idle_km:.1f} km from {row['original_vehicle']}"
+        why = (f"{row['customer']} ({row['priority']}) {lateness}; {where}, "
                f"so it can collect the parcel from {row['original_vehicle']} and deliver by {eta_txt}.")
         actions.append({
             "action_type": "reassign",

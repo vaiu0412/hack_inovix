@@ -52,11 +52,12 @@ def click(at, label, where=None):
 
 
 def sign_in(identifier, password, super_console=False):
-    at = start("super" if super_console else None)
+    # the console is its own page at /console; run it directly, then carry the session into the app
+    at = ok(AppTest.from_file("views/console.py", default_timeout=60).run()) if super_console else start()
     prefix = "sa" if super_console else "si"
     at.text_input(key=f"{prefix}_id").set_value(identifier)
     at.text_input(key=f"{prefix}_pw").set_value(password)
-    click(at, "Sign in to console" if super_console else "Sign in")
+    click(at, "Sign in")
     return continue_session(at) if "authenticated" in at.session_state else at
 
 
@@ -76,12 +77,17 @@ def test_sign_in_page_shows_nothing_else(db):
     assert any(b.label == "Sign in" for b in at.button) and "Welcome back" in text_of(at)
     assert not at.metric and not at.dataframe and not list(at.sidebar.button)
     assert "Admin@123" not in text_of(at) and "Partner@123" not in text_of(at)   # no demo credentials
+    visible = " ".join(m.value for m in at.markdown if not m.value.lstrip().startswith("<style>"))
+    assert "Super Admin" not in visible and "console" not in visible.lower()     # console is not advertised
+    [google] = [b for b in at.button if b.label == "Continue with Google"]
+    assert google.disabled and google.help == "Google sign-in not set up"         # no fake Google flow
 
 
 def test_sign_in_errors(db):
-    assert sign_in("east.admin@deport.in", "wrong").error[0].value == "Incorrect email/ID or password"
-    assert "Super Admin access" in sign_in("superadmin@deport.in", "Super@123").error[0].value
-    assert "Super Admins only" in sign_in("east.admin@deport.in", "Admin@123", super_console=True).error[0].value
+    assert sign_in("east.admin@deport.in", "wrong").error[0].value == "Wrong ID or password."
+    assert sign_in("", "x").error[0].value == "Enter your email or ID."
+    assert sign_in("superadmin@deport.in", "Super@123").error[0].value == "Wrong ID or password."  # console only
+    assert sign_in("east.admin@deport.in", "Admin@123", super_console=True).error[0].value == "Super Admins only."
 
 
 def test_super_admin_pages(db):
@@ -131,9 +137,9 @@ def test_otp_login(db):
     click(at, "Send code")
     code = at.session_state["otp_demo"]
     at = ok(fresh(login_view="otp", otp_step=2, otp_ident="dp102@deport.in", otp_demo=code).run())
-    assert "Demo SMS" in " ".join(i.value for i in at.info)
+    assert "DEMO" in " ".join(i.value for i in at.info)
     at.text_input(key="otp_code").set_value(code)
-    click(at, "Verify and sign in")
+    click(at, "Sign in")
     assert at.session_state["dp_id"] == "DP102"
 
 

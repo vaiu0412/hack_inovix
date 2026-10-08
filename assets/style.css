@@ -20,7 +20,7 @@
 [data-testid="stHeaderActionElements"], [data-testid="stToolbarActions"] { display: none !important; }
 
 /* ---------- layout: 8px grid, page fade-in */
-[data-testid="stMainBlockContainer"] { padding-top: 2.5rem; padding-bottom: 3rem; animation: dp-fade .2s ease-out; }
+[data-testid="stMainBlockContainer"] { padding-top: 3.5rem; padding-bottom: 3rem; animation: dp-fade .2s ease-out; }
 @keyframes dp-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* ---------- type scale 28 / 20 / 16 / 14 */
@@ -178,12 +178,12 @@
 
 /* ---------- phones: 16px gutters, 2 KPI tiles per row, no horizontal scroll at 380px */
 @media (max-width: 640px) {
-  [data-testid="stMainBlockContainer"] { padding-left: 1rem; padding-right: 1rem; padding-top: 2.2rem; }
+  [data-testid="stMainBlockContainer"] { padding-left: 1rem; padding-right: 1rem; padding-top: 4.25rem; }
   .dp-h1 { font-size: 22px; } .dp-h2, .dp-step { font-size: 18px; }
   .dp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .dp-kpi { padding: 14px; } .dp-kpi .num { font-size: 24px; }
   [class*="st-key-card"] { padding: 16px !important; }
-  .dp-header .t svg { width: 28px; height: 28px; }
+  .dp-header .t svg { display: none; }  /* the top bar already shows the logo on phones */
   iframe[title="streamlit_folium.st_folium"] { height: 420px !important; }
 }
 @media (prefers-reduced-motion: reduce) {

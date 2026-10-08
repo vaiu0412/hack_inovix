@@ -137,7 +137,7 @@ def health():
 def login(body: LoginIn):
     user, error = auth.authenticate(body.identifier, body.password, "super" if body.super_console else "workspace")
     if error:
-        status = 429 if "Too many" in error else 403 if error in (
+        status = 429 if error == auth.MESSAGES["locked"] else 403 if error in (
             auth.MESSAGES["inactive"], auth.MESSAGES["branch_inactive"], auth.MESSAGES["use_super_portal"],
             auth.MESSAGES["super_only"]) else 401
         raise HTTPException(status, error)

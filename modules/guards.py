@@ -37,7 +37,6 @@ PARTNER_PAGES = {
     "route": "views/partner/my_route.py",
     "report": "views/partner/report_issue.py",
     "history": "views/partner/my_history.py",
-    "notifications": "views/partner/notifications.py",
 }
 
 

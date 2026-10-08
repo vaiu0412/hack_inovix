@@ -27,17 +27,19 @@ OTP_MINUTES = 5
 OTP_TRIES = 3
 ROLE_LABELS = {"super_admin": "Super Admin", "branch_admin": "Branch Admin", "partner": "Delivery Partner"}
 
-MESSAGES = {
-    "missing": "Enter your email or ID and your password.",
-    "bad_credentials": "Incorrect email/ID or password",
-    "locked": "Too many attempts, try again in 2 minutes",
-    "inactive": "Account deactivated — contact your branch admin",
-    "branch_inactive": "Branch is inactive",
-    "use_super_portal": "Super Admin accounts sign in through Super Admin access.",
-    "super_only": "This console is for Super Admins only.",
-    "weak_password": "Use at least 8 characters with a letter and a number.",
-    "otp_invalid": "That code is wrong or has expired. Request a new one.",
-    "otp_unknown": "We couldn't find an active account with that email or ID.",
+MESSAGES = {  # short, one sentence each (shown as-is on the sign-in page and by the API)
+    "missing": "Enter your email or ID.",
+    "missing_password": "Enter your password.",
+    "bad_credentials": "Wrong ID or password.",
+    "locked": "Too many tries. Wait 2 min.",
+    "inactive": "Account inactive.",
+    "branch_inactive": "Branch inactive.",
+    "use_super_portal": "Use the admin console.",
+    "super_only": "Super Admins only.",
+    "weak_password": "Use 8+ characters with a letter and a number.",
+    "otp_invalid": "Wrong or expired code.",
+    "otp_unknown": "No active account found.",
+    "reset_ok": "Password changed. Sign in now.",
 }
 _DUMMY = hash_password("timing-equaliser")  # verify against something even for unknown IDs
 
@@ -83,8 +85,10 @@ def _status_problem(row, portal):
 # ---------------------------------------------------------------- password sign-in
 def authenticate(identifier, password, portal="workspace"):
     """Return (user, None) on success or (None, message). portal: 'workspace' or 'super'."""
-    if not normalize(identifier) or not password:
+    if not normalize(identifier):
         return None, MESSAGES["missing"]
+    if not password:
+        return None, MESSAGES["missing_password"]
     with store.connect() as conn:
         row = _find(conn, identifier)
         if row and (row["locked_until"] or 0) > time.time():
@@ -186,7 +190,7 @@ def request_otp(identifier, purpose):
         phone = row["phone"] or ""
     store.audit(row["user_id"], f"otp_requested_{purpose}")
     hint = f"…{phone[-4:]}" if phone else "your phone"
-    return (None if sms_configured() else code), f"We sent a 6-digit code to {hint}.", True
+    return (None if sms_configured() else code), f"Code sent to {hint}.", True
 
 
 def verify_otp(identifier, code, purpose):
@@ -246,7 +250,7 @@ def reset_password_with_otp(identifier, code, new_password):
     if error:
         return False, error
     set_password(user["user_id"], new_password)
-    return True, "Password reset successful"
+    return True, MESSAGES["reset_ok"]
 
 
 # ---------------------------------------------------------------- permissions + scope
@@ -283,15 +287,6 @@ def user_for_google_email(email):
         user = public(row)
     store.audit(user["user_id"], "login", "workspace", {"method": "google"}, user["branch_id"])
     return user, None
-
-
-def demo_google_accounts():
-    """Seeded workspace emails for the demo Google chooser (Super Admin is not offered)."""
-    with store.connect() as conn:
-        rows = conn.execute("SELECT u.email, u.display_name, u.role_id, b.name AS branch FROM users u LEFT JOIN "
-                            "branches b ON b.branch_id = u.branch_id WHERE u.is_active = 1 AND u.role_id != "
-                            "'super_admin' AND u.created_by = 'system' ORDER BY u.role_id, u.user_id").fetchall()
-    return [dict(r) for r in rows]
 
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ def test_forgot_password(db):
     code, _, ok = auth.request_otp("east.admin@deport.in", "reset")
     assert ok
     assert auth.reset_password_with_otp("east.admin@deport.in", code, "short") == (False, auth.MESSAGES["weak_password"])
-    assert auth.reset_password_with_otp("east.admin@deport.in", code, "NewPass2026") == (True, "Password reset successful")
+    assert auth.reset_password_with_otp("east.admin@deport.in", code, "NewPass2026") == (True, auth.MESSAGES["reset_ok"])
     assert login("east.admin@deport.in", "Admin@123")[0] is None
     assert login("east.admin@deport.in", "NewPass2026")[0]["user_id"] == "east.admin"
     assert auth.reset_password_with_otp("east.admin@deport.in", code, "Again2026x")[0] is False  # code used

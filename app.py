@@ -16,11 +16,13 @@ from modules.guards import SUPER_PAGES as S
 ui.setup_store()
 user = guards.restore()
 role = user["role"] if user else None
-ui.setup_page(layout="centered" if role == "partner" else "wide")
+ui.setup_page(layout="centered" if role == "partner" else "wide", role=role)
 guards.flush_cookie_ops()
 
 if user is None:
-    st.navigation([st.Page("views/login.py", title="Sign in", icon=":material/login:", default=True)],
+    # the admin console lives at /console (file stem = URL path); the public page never links to it
+    st.navigation([st.Page("views/login.py", title="Sign in", icon=":material/login:", default=True),
+                   st.Page("views/console.py", title="Console", icon=":material/lock:")],
                   position="hidden").run()
     st.stop()
 
@@ -28,26 +30,25 @@ if role == "super_admin":
     pages = [
         st.Page(S["overview"], title="Overview", icon=":material/insights:", default=True),
         st.Page(S["branches"], title="Branches", icon=":material/store:"),
-        st.Page(S["admins"], title="Branch Admins", icon=":material/admin_panel_settings:"),
-        st.Page(S["audit"], title="Audit Log", icon=":material/policy:"),
+        st.Page(S["admins"], title="Admins", icon=":material/admin_panel_settings:"),
+        st.Page(S["audit"], title="Audit log", icon=":material/policy:"),
     ]
 elif role == "branch_admin":
     pages = [
         st.Page(B["command"], title="Command Center", icon=":material/space_dashboard:", default=True),
-        st.Page(B["map"], title="Map & Operations", icon=":material/map:"),
-        st.Page(B["partners"], title="Delivery Partners", icon=":material/groups:"),
+        st.Page(B["map"], title="Live Map", icon=":material/map:"),
+        st.Page(B["partners"], title="Partners", icon=":material/groups:"),
         st.Page(B["deliveries"], title="Deliveries", icon=":material/package_2:"),
-        st.Page(B["disruptions"], title="Disruptions & AI", icon=":material/psychology:"),
+        st.Page(B["disruptions"], title="Alerts", icon=":material/notifications_active:"),
         st.Page(B["history"], title="History", icon=":material/history:"),
     ]
 else:
     pages = [
         st.Page(P["today"], title="Today", icon=":material/today:", default=True),
-        st.Page(P["deliveries"], title="My Deliveries", icon=":material/package_2:"),
-        st.Page(P["route"], title="My Route", icon=":material/route:"),
-        st.Page(P["report"], title="Report Issue", icon=":material/campaign:"),
-        st.Page(P["history"], title="My History", icon=":material/history:"),
-        st.Page(P["notifications"], title="Notifications", icon=":material/notifications:"),
+        st.Page(P["deliveries"], title="Deliveries", icon=":material/package_2:"),
+        st.Page(P["route"], title="Route", icon=":material/route:"),
+        st.Page(P["report"], title="Report", icon=":material/campaign:"),
+        st.Page(P["history"], title="History", icon=":material/history:"),
     ]
 
 navigation = st.navigation(pages)

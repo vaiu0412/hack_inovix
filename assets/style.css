@@ -3,6 +3,7 @@
 
 .block-container { padding-top: 3.2rem; padding-bottom: 3rem; }
 [data-testid="stAppDeployButton"] { display: none; }
+[data-testid="stHeaderActionElements"] { display: none; }  /* no link icons next to headings */
 
 /* ---------- page header */
 .rp-header { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px;
@@ -23,7 +24,7 @@
 .rp-medium   { background: rgba(202, 138, 4, .14); color: #B7791F; border-color: rgba(202, 138, 4, .38); }
 .rp-low      { background: rgba(22, 163, 74, .12); color: #16A34A; border-color: rgba(22, 163, 74, .35); }
 .rp-neutral  { background: rgba(128, 128, 128, .12); border-color: rgba(128, 128, 128, .28); }
-.rp-brand    { background: rgba(15, 118, 110, .12); color: #0F9488; border-color: rgba(15, 118, 110, .35); }
+.rp-brand    { background: rgba(37, 99, 235, .12); color: #2563EB; border-color: rgba(37, 99, 235, .35); }
 
 /* ---------- small key/value grid used in cards */
 .rp-kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px 16px; margin: 4px 0 2px; }
@@ -38,8 +39,8 @@
 .rp-person div small { opacity: 0.65; }
 
 /* ---------- AI note */
-.rp-note { border-left: 3px solid #0F9488; padding: 8px 12px; margin: 6px 0 10px; border-radius: 0 8px 8px 0;
-  background: rgba(15, 118, 110, .07); font-size: 0.95rem; line-height: 1.5; }
+.rp-note { border-left: 3px solid #2563EB; padding: 8px 12px; margin: 6px 0 10px; border-radius: 0 8px 8px 0;
+  background: rgba(37, 99, 235, .07); font-size: 0.95rem; line-height: 1.5; }
 .rp-note b { display: block; font-size: 0.75rem; letter-spacing: .02em; opacity: .75; margin-bottom: 2px; }
 
 /* ---------- quoted transcript */

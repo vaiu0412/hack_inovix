@@ -96,11 +96,12 @@ def init_db():
     """Create the database on first use (and seed it with the demo data)."""
     with connect() as conn:
         conn.executescript(SCHEMA)
-        seeded = conn.execute("SELECT COUNT(*) FROM partners").fetchone()[0]
+        ids = {r[0] for r in conn.execute("SELECT partner_id FROM partners")}
+        outdated = bool(ids) and ids != set(load_partners()["partner_id"])  # e.g. old P1-P6 partner IDs
         has_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        if seeded and not has_users:  # database from before logins existed: add the accounts only
+        if ids and not outdated and not has_users:  # database from before logins existed: add accounts only
             _seed_users(conn)
-    if not seeded:
+    if not ids or outdated:
         reset_demo()
 
 

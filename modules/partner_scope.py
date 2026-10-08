@@ -40,6 +40,8 @@ def get_partner_profile(dp_id):
         "next_eta": nxt["planned_eta"] if nxt is not None else "—",
         "shift": f"{partner['shift_start']}–{partner['shift_end']}",
         "languages": partner["languages"].replace("|", ", "), "rating": partner["rating"],
+        "lat": vehicle["current_lat"], "lng": vehicle["current_lng"],
+        "open_issues": sum(1 for i in store.list_issues(store.OPEN_ISSUE_STATUSES, partner_id=dp_id)),
     }
 
 

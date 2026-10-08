@@ -9,7 +9,7 @@ import folium
 
 from modules.data_loader import COIMBATORE_CENTER, road_midpoint
 
-STATUS_COLOURS = {"on_duty": "#16A34A", "standby": "#0F9488", "on_break": "#CA8A04", "off_duty": "#6B7280"}
+STATUS_COLOURS = {"on_duty": "#16A34A", "standby": "#2563EB", "on_break": "#CA8A04", "off_duty": "#6B7280"}
 STATUS_TEXT = {"on_duty": "On duty", "standby": "Standby", "on_break": "On break", "off_duty": "Off duty"}
 RISK_COLOURS = {"Critical": "#DC2626", "High": "#EA580C", "Medium": "#CA8A04", "Low": "#16A34A"}
 ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services"
@@ -104,7 +104,7 @@ def build(partners, deliveries, roads, disruptions=(), detour_roads=(), risk_lab
     for p in partners.to_dict("records"):
         size = 36 if p["partner_id"] == selected else 30
         colour = STATUS_COLOURS.get(p["status"], "#6B7280")
-        ring = "box-shadow:0 0 0 4px rgba(15,118,110,.35);" if p["partner_id"] == selected else ""
+        ring = "box-shadow:0 0 0 4px rgba(37,99,235,.35);" if p["partner_id"] == selected else ""
         folium.Marker(
             (p["lat"], p["lng"]),
             icon=folium.DivIcon(

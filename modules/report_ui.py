@@ -2,13 +2,31 @@
 
 1. tap a quick type, record a voice note, or type     2. "Check" -> what we understood
 3. fix the place if needed                              4. "Send" -> manager gets problem + AI plan
+
+Partners go through modules/partner_scope (only their own data, reports always filed as
+themselves); the manager's 'Log an issue' uses the operations-wide functions.
 """
 from html import escape
 
 import streamlit as st
 
-from modules import issues, store, ui
+from modules import issues, ui
+from modules.data_loader import load_all
 from modules.voice import available_engines
+
+
+def _backend(reporter_id, source):
+    """(preview, submit, road options) for this kind of reporter."""
+    if source == "partner":
+        from modules import partner_scope as scope
+
+        return (lambda **kw: scope.preview_issue(reporter_id, **kw),
+                lambda problem, **kw: scope.report_issue(reporter_id, problem, **kw),
+                lambda: scope.route_road_options(reporter_id))
+    roads = load_all()["roads"]
+    return (lambda **kw: issues.preview(reporter_id, **kw),
+            lambda problem, **kw: issues.submit(reporter_id, problem, source="manager", **kw),
+            lambda: list(zip(roads["road_id"], roads["name"])))
 
 
 def _key(prefix, name):
@@ -24,6 +42,7 @@ def _clear(prefix):
 
 def report_form(partner_id, prefix="report", source="partner"):
     """Draw the form. Returns the new issue id right after sending, else None."""
+    preview_fn, submit_fn, road_options_fn = _backend(partner_id, source)
     quick = st.pills("What happened?", list(issues.QUICK_TYPES), format_func=issues.QUICK_TYPES.get,
                      key=_key(prefix, "quick"))
     audio = st.audio_input("Voice note (Tamil, English or both)", key=_key(prefix, "audio"))
@@ -38,7 +57,7 @@ def report_form(partner_id, prefix="report", source="partner"):
         audio_bytes = audio.getvalue() if audio else None
         ui.pause_live_updates()  # keep the preview on screen until it is sent
         with st.spinner("Listening and understanding…"):
-            result = issues.preview(partner_id, text=text, audio=audio_bytes, quick_type=quick)
+            result = preview_fn(text=text, audio=audio_bytes, quick_type=quick)
         st.session_state[f"{prefix}_preview"] = {**result, "audio": audio_bytes, "quick": quick}
 
     preview = st.session_state.get(f"{prefix}_preview")
@@ -56,15 +75,13 @@ def report_form(partner_id, prefix="report", source="partner"):
         if preview["transcript"]:
             st.markdown(f'<div class="rp-quote">“{escape(preview["transcript"])}”</div>', unsafe_allow_html=True)
         if problem.get("needs_location"):
-            data = store.snapshot()
-            own = issues.route_roads(issues.reporter(partner_id), data)
-            names = dict(zip(data["roads"]["road_id"], data["roads"]["name"]))
-            options = [r for r, _ in own] + [r for r in names if r not in dict(own)]
+            options = road_options_fn()  # own roads first for partners
+            names = dict(options)
             st.markdown("**Where is it?** Tap the road:")
-            road = st.pills("Road", options, format_func=names.get, key=_key(prefix, "road"),
+            road = st.pills("Road", [r for r, _ in options], format_func=names.get, key=_key(prefix, "road"),
                             label_visibility="collapsed")
             if road:
-                problem = issues.set_location(problem, road, data)
+                problem = issues.set_location(problem, road, {"roads": load_all()["roads"]})
                 preview["problem"] = problem
         st.markdown(f"**{problem['summary']}**")
         if problem.get("suggestions") and not problem.get("needs_location"):
@@ -73,9 +90,8 @@ def report_form(partner_id, prefix="report", source="partner"):
         send, again = st.columns(2)
         if send.button("Send to manager", type="primary", width="stretch", icon=":material/send:",
                        key=_key(prefix, "send"), disabled=problem.get("needs_location", False)):
-            issue_id = issues.submit(partner_id, problem, transcript=preview["transcript"],
-                                     engine=preview["engine"], audio=preview["audio"], quick_type=preview["quick"],
-                                     source=source)
+            issue_id = submit_fn(problem, transcript=preview["transcript"], engine=preview["engine"],
+                                 audio=preview["audio"], quick_type=preview["quick"])
             _clear(prefix)
             return issue_id
         if again.button("Start again", width="stretch", key=_key(prefix, "again")):

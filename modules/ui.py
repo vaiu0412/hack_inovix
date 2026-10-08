@@ -6,14 +6,17 @@ from pathlib import Path
 
 import streamlit as st
 
-from modules import store
+from modules import guards, store
 from modules.data_loader import NOW_MIN, min_to_hhmm
+from modules.parser import setting
 
 CSS_PATH = Path(__file__).resolve().parent.parent / "assets" / "style.css"
+TEAM_NAME = setting("TEAM_NAME", "Team Ripple")  # shown on the home page; set TEAM_NAME in secrets to change
+BRAND = "#2563EB"
 RISK_CLASS = {"Critical": "rp-critical", "High": "rp-high", "Medium": "rp-medium", "Low": "rp-low"}
 RISK_HEX = {"Critical": "#DC2626", "High": "#EA580C", "Medium": "#CA8A04", "Low": "#16A34A", "On track": "#64748B"}
 SEVERITY_CLASS = {"critical": "rp-critical", "high": "rp-high", "medium": "rp-medium", "low": "rp-low"}
-PARTNER_STATUS = {"on_duty": ("On duty", "rp-low", "#16A34A"), "standby": ("Standby", "rp-brand", "#0F9488"),
+PARTNER_STATUS = {"on_duty": ("On duty", "rp-low", "#16A34A"), "standby": ("Standby", "rp-brand", "#2563EB"),
                   "on_break": ("On break", "rp-medium", "#CA8A04"), "off_duty": ("Off duty", "rp-neutral", "#6B7280")}
 ISSUE_STATUS = {"new": ("Needs location", "rp-medium"), "analysed": ("Waiting for decision", "rp-high"),
                 "accepted": ("Plan applied", "rp-low"), "rejected": ("Rejected", "rp-neutral")}
@@ -22,9 +25,9 @@ ACTION_LABELS = {"reassign": ("Reassign to backup", "#DC2626"), "reroute": ("Rer
 
 
 def setup_page(layout="wide"):
-    # collapsed: on phones the navigation menu must not cover the page on every load
+    # auto: the menu is open on laptops and folded away on phones
     st.set_page_config(page_title="Ripple", page_icon=":material/route:", layout=layout,
-                       initial_sidebar_state="collapsed")
+                       initial_sidebar_state="auto")
     st.markdown(f"<style>{CSS_PATH.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
     store.init_db()
 
@@ -121,6 +124,35 @@ def pause_live_updates(seconds=180):
 
 def resume_live_updates():
     st.session_state.pop("_pause_until", None)
+
+
+def sidebar_user():
+    """Who is logged in, the clock, Logout – and Reset demo data for managers only."""
+    s = st.session_state
+    with st.sidebar:
+        if s["role"] == "partner":
+            from modules import partner_scope
+
+            profile = partner_scope.get_partner_profile(s["dp_id"])
+            line = f"{s['dp_id']} · {profile['vehicle_type'].title()} {profile['reg_no']}"
+            colour = PARTNER_STATUS.get(profile["status"], ("", "", "#6B7280"))[2]
+            role_badge = badge("Delivery Partner", "rp-low")
+        else:
+            line, colour, role_badge = s["user_id"], BRAND, badge("Manager", "rp-brand")
+        st.markdown(f'<div class="rp-person"><div class="rp-avatar" style="background:{colour}">'
+                    f'{escape(initials(s["display_name"]))}</div><div><b>{escape(s["display_name"])}</b><br>'
+                    f'<small>{escape(line)}</small></div></div><div style="margin:8px 0 2px">{role_badge}</div>',
+                    unsafe_allow_html=True)
+        st.caption(f":material/schedule: {clock_text()}")
+        if st.button("Logout", icon=":material/logout:", width="stretch", key="logout"):
+            guards.logout()
+        if s["role"] == "manager":
+            with st.popover("Reset demo data", icon=":material/restart_alt:", width="stretch"):
+                st.write("Back to 09:00 with no issues, all deliveries pending and the demo accounts restored. "
+                         "Everyone using the app sees the reset.")
+                if st.button("Reset everything", type="primary", key="reset_demo"):
+                    store.reset_demo()
+                    st.rerun()
 
 
 def live_updates(every="4s"):

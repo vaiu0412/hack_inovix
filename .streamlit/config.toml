@@ -7,22 +7,22 @@ showWidgetBorder = true
 showSidebarBorder = true
 
 [theme.light]
-primaryColor = "#0F766E"
+primaryColor = "#2563EB"
 backgroundColor = "#F6F7F9"
 secondaryBackgroundColor = "#FFFFFF"
 textColor = "#111827"
 borderColor = "#E2E5EA"
 dataframeHeaderBackgroundColor = "#F1F3F6"
-linkColor = "#0F766E"
+linkColor = "#2563EB"
 
 [theme.dark]
-primaryColor = "#2DD4BF"
+primaryColor = "#60A5FA"
 backgroundColor = "#0D1117"
 secondaryBackgroundColor = "#161B22"
 textColor = "#E6EDF3"
 borderColor = "#2A313B"
 dataframeHeaderBackgroundColor = "#1B212A"
-linkColor = "#2DD4BF"
+linkColor = "#60A5FA"
 
 [server]
 headless = true

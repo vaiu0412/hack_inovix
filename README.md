@@ -2,7 +2,7 @@
 
 > Every disruption creates a ripple. We show how far it spreads — and how to stop it.
 
-**Live demo:** _add your Streamlit Cloud link here after deploying (see "Free public demo link" below)_
+**Live demo:** <https://ripple-coimbatore.streamlit.app> (free hosting – if it shows "app is asleep", click wake up and wait ~1 min)
 
 ## Problem
 A single accident, flood or breakdown in a city like Coimbatore quietly breaks dozens of delivery
@@ -76,7 +76,7 @@ Every module also has a self-test, e.g. `python -m modules.impact`.
    ```
    Leave secrets empty to run in rule-based mode – everything still works.
 6. Click **Deploy**. The first build takes a few minutes; every push to `main` redeploys automatically.
-7. Paste the link at the top of this README.
+7. Paste the link at the top of this README (done: <https://ripple-coimbatore.streamlit.app>).
 
 Free apps go to sleep after a while without visitors – open the link a few minutes before judging.
 

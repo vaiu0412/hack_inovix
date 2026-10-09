@@ -63,7 +63,9 @@ else:
 
 navigation = st.navigation(pages)
 last_page = ui.sync_prefs(user, navigation.url_path)  # filters + last page are saved per user in SQLite
-if last_page and role != "partner" and last_page != navigation.url_path:  # partners always open on Today
+# back to the admin's last page only when they land on the home page (a direct link like /assign is kept);
+# partners always open on Today
+if last_page and role != "partner" and navigation.url_path == "" and last_page != navigation.url_path:
     target = next((p for p in pages if p.url_path == last_page), None)
     if target is not None:
         st.switch_page(target)

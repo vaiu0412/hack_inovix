@@ -10,3 +10,7 @@ data/deport.db
 data/deport.db-*
 data/backups/
 data/voice/
+
+# Office lock files and slide build images (already inside the .pptx)
+~$*
+docs/presentation/assets/

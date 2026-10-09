@@ -4,11 +4,18 @@
 
 **Live demo:** <https://ripple-coimbatore.streamlit.app> · built for HackNext'26 (Coimbatore)
 
-| Sign-in | Command Center | Alerts (3 steps) | Partner phone |
-|---|---|---|---|
-| `docs/screenshots/login.png` | `docs/screenshots/command-center.png` | `docs/screenshots/alerts.png` | `docs/screenshots/partner-today.png` |
+| Sign-in | Command Center (branch admin) |
+|---|---|
+| ![Sign-in page](docs/screenshots/01_login.jpg) | ![Command Center with an open alert](docs/screenshots/02_command_center.jpg) |
+| **Live Map** | **Assign Work** |
+| ![Live map on real roads](docs/screenshots/03_live_map.jpg) | ![Assign Work queue with best match](docs/screenshots/05_assign.jpg) |
 
-*(Screenshot placeholders – add the PNGs to `docs/screenshots/`.)*
+| Alerts – 3 steps | Partner: Today | Partner: Report | Partner: Route |
+|---|---|---|---|
+| ![Alerts page](docs/screenshots/04_alerts.jpg) | ![Partner Today](docs/screenshots/08_partner_today.jpg) | ![Partner Report](docs/screenshots/07_partner_report.jpg) | ![Partner Route](docs/screenshots/09_partner_route.jpg) |
+
+**Presentation:** [slides (PowerPoint)](docs/presentation/DEPORT_Presentation.pptx) ·
+[presentation script & viva guide (Word)](docs/presentation/DEPORT_Presentation_Script_and_Viva.docx)
 
 ## What DEPORT does
 1. **Report by voice** – a delivery partner taps *Accident* or says *"Avinashi road la accident, full block,

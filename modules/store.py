@@ -480,7 +480,8 @@ def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
     df = _df("SELECT * FROM deliveries" + _where(clauses) + " ORDER BY vehicle_id, stop_order", params)
     df["deadline_min"] = df["deadline"].apply(hhmm_to_min)
     # an unassigned order has no ETA yet: use its deadline so sorting and maths still work
-    df["eta_min"] = [hhmm_to_min(eta) if eta else due for eta, due in zip(df["planned_eta"], df["deadline_min"])]
+    df["eta_min"] = [hhmm_to_min(eta) if isinstance(eta, str) and eta else due
+                     for eta, due in zip(df["planned_eta"], df["deadline_min"])]
     return df
 
 

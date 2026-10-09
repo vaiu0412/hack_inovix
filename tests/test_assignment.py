@@ -29,6 +29,14 @@ def test_new_order_is_unassigned_in_the_admins_branch(east):
         assign.create_order(auth.get_user("DP102"), "x", "1", "Peelamedu", "Parcel", "standard", "12:00", "small")
 
 
+def test_unassigned_order_has_no_eta_on_every_pandas_version(east):
+    # pandas 3 reads empty text as NaN – the live site crashed on the missing ETA of a new order
+    order_id, _ = new_order(east, deadline="16:00")
+    order = store.deliveries_df(branch_id="CBE-E").set_index("delivery_id").loc[order_id]
+    assert order["planned_eta"] is None and order["eta_min"] == 16 * 60
+    assert not store.partners_df("CBE-E").empty                           # the page that crashed loads again
+
+
 def test_best_match_is_the_nearest_partner_whose_vehicle_fits(east):
     small, _ = new_order(east, area="Ukkadam", size="small")
     best = assign.best_match(small, "CBE-E")

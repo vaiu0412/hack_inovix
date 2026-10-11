@@ -41,9 +41,12 @@ flowchart LR
         assign["assign (work)"]
         auth["auth + RBAC"]
         geometry["geometry (road shapes)"]
+        escalation["escalation (offers)"]
     end
     engine --> db[("SQLite<br/>DB_PATH")]
     parser -. "optional key" .-> llm["Groq / Gemini"]
+    escalation -. "services/voice_call" .-> twilio["Twilio Voice"]
+    twilio -. "webhooks" .-> api
     geometry -. "cached in data/" .-> osrm["OSRM"]
 ```
 
@@ -54,6 +57,9 @@ flowchart LR
 - **Impact → risk → plan:** cascade over each route, a 0–100 risk score, recommended actions with reasons.
 - **Live map** on real road shapes, alerts in 3 steps, KPIs, history, partner phone screens.
 - **Assign Work:** new orders (form or CSV), best partner with a reason, step-by-step delivery flow.
+- **No missed orders:** every assignment is an offer – Sent → Seen → Ringing (alarm) → AI voice call (Twilio, or a
+  simulated call in Demo mode) → red admin alert with the next-best partner and one-click Reassign
+  ([`docs/AI_CALL.md`](docs/AI_CALL.md)).
 - **Nothing is lost:** drafts, filters and data survive refresh and restarts; reset saves a backup first.
 - **Secure sign-in:** hashed passwords and sessions, lockout, OTP by email, optional Google sign-in.
 
@@ -72,9 +78,9 @@ flowchart LR
 pip install -r requirements.txt
 streamlit run app.py                 # http://localhost:8501  (Super Admin: /console)
 ```
-Docker (data kept in a volume):
+Docker (app + API, data kept in a volume):
 ```bash
-docker compose up --build            # http://localhost:8501
+docker compose up --build            # app :8501 · API :8000/docs
 ```
 Tests and lint: `pip install -r requirements-dev.txt`, then `pytest -q` and `ruff check .` (no internet or keys).
 REST API: `uvicorn api.main:app --reload` → docs at <http://localhost:8000/docs>.
@@ -100,21 +106,25 @@ For judges and this README only – never shown in the app.
 4. **Alerts** → what changed → what's affected → what to do → **Accept plan** → *Plan applied* (missed 3 → 0).
 5. **Phone:** DP102 sees **Route changed**; DP106 has the KMCH insulin pickup.
 6. *Bonus:* **Assign Work** → new order → **Assign best** → partner taps *Accept → Picked up → Start → Delivered*.
+7. *Escalation:* assign a **medical** order to DP102 and don't answer: full-screen card → alarm at 1 min → call
+   (simulated without Twilio keys) at 3 min → red alert with **Reassign to …** at 5 min (times: Super Admin → Overview).
 
 ## Project structure
 ```
 app.py         sign-in first, then role-based navigation
 views/         pages: manager/ · partner/ · super/ · login · console
-modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, geometry, places)
-               + UI helpers (ui, manager_ui, partner_ui, report_ui, login_ui, live_map, graph_viz)
-api/           FastAPI REST for a native app
+modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, escalation,
+               geometry, places) + UI helpers (ui, manager_ui, partner_ui, report_ui, login_ui, escalation_ui,
+               live_map, graph_viz)
+services/      optional outside providers with a Demo-mode fallback (voice_call: Twilio)
+api/           FastAPI REST for a native app + Twilio webhooks + the offer timer
 data/          demo data with real Coimbatore coordinates + cached road shapes
-tests/         152 tests (flows, RBAC, persistence, assignment, API, headless UI)
+tests/         168 tests (flows, RBAC, persistence, assignment, escalation, API, headless UI)
 ```
 
 ## Roadmap
 - [x] Portfolio-ready: lint, docstrings, Docker, CI, deploy guide
-- [ ] Order accept + escalation (sound → AI voice call → reassign)
+- [x] Order accept + escalation (sound → AI voice call → reassign)
 - [ ] Delay prediction model (proactive "likely late")
 - [ ] OR-Tools re-optimisation alongside the rule-based plan
 - [ ] Learning from admin decisions

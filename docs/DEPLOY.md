@@ -61,6 +61,11 @@ codes are shown on screen labelled DEMO.
 4. Restart – **Continue with Google** appears. Without it the button is hidden.
 5. Only emails of active DEPORT accounts get in (Branch Admins can link a partner's email via *Link Google*).
 
+### AI voice call for unaccepted orders
+Twilio Voice keys plus `PUBLIC_BASE_URL` (where Twilio reaches the API). Run the API next to the app on the same
+database – `docker compose` already does. Setup and testing with ngrok: [`AI_CALL.md`](AI_CALL.md). Without keys
+the partner app shows a simulated call.
+
 ### AI (voice + understanding)
 `GROQ_API_KEY` (free at console.groq.com) or `GEMINI_API_KEY`. Without a key, reports are understood by the
 built-in Tamil/English rules and voice uses free Google speech recognition.

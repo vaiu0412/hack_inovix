@@ -1,4 +1,4 @@
-# docker compose up --build   →   http://localhost:8501   (Super Admin: http://localhost:8501/console)
+# docker compose up --build   →   app http://localhost:8501 (Super Admin: /console) · API http://localhost:8000/docs
 # Data survives restarts and rebuilds in the "deport-data" volume. Optional keys go in .env (see .env.example).
 services:
   app:
@@ -15,6 +15,26 @@ services:
       - deport-data:/data
       # Google sign-in needs the [auth] section of secrets.toml – uncomment to use your local file:
       # - ./.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro
+    restart: unless-stopped
+
+  # REST API + Twilio call webhooks + the offer timer when no page is open (docs/AI_CALL.md). Same data volume.
+  api:
+    build: .
+    image: deport:latest
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    environment:
+      DB_PATH: /data/deport.db
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - deport-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
     restart: unless-stopped
 
 volumes:

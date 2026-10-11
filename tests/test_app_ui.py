@@ -5,6 +5,7 @@ import pytest
 from streamlit.testing.v1 import AppTest, element_tree
 
 from modules import auth, guards, store
+from modules import partner_scope as scope
 
 
 def _indices(self):  # AppTest expects lists; single-choice segmented controls hold one value
@@ -297,3 +298,19 @@ def test_command_center_shows_likely_late_and_switches_weather(db):
     assert "Heavy rain" in text_of(ok(_page_as(guards.BRANCH_PAGES["command"], east)))
     page = ok(_page_as(guards.BRANCH_PAGES["deliveries"], east))
     assert "Late risk" in page.dataframe[0].value.columns
+
+
+def test_admin_compares_and_applies_the_optimised_plan(db):
+    from modules import optimizer
+
+    if not optimizer.available():
+        pytest.skip("OR-Tools is not installed")
+    seen = scope.preview_issue("DP102", "CBE-E", text="avinasi rd la accident, full block, rendu mani neram aagum")
+    issue_id = scope.report_issue("DP102", "CBE-E", seen["problem"], transcript=seen["transcript"])
+    east = auth.get_user("east.admin")
+    page = ok(_page_as(guards.BRANCH_PAGES["disruptions"], east))
+    assert "Rule-based or optimised?" in text_of(page) and "Total km" in text_of(page)
+    page.button_group(key=f"choice_{issue_id}").set_value("optimised").run()
+    click(page, "Accept optimised plan")
+    issue = store.get_issue(issue_id)
+    assert issue["status"] == "accepted" and issue["plan"]["chosen"] == "optimised"

@@ -473,9 +473,15 @@ def modify_form(ctx, issue, where="top"):
 
 
 def before_after_rows(plan):
-    """Before -> After numbers for the success strip."""
+    """Before -> After numbers for the success strip (of the plan that was applied)."""
     ba = plan.get("before_after") or {}
     hit = max((plan.get("summary") or {}).get("affected_deliveries", 0), 1)
+    comparison = (plan.get("optimised") or {}).get("comparison") or {}
+    if plan.get("chosen") == "optimised" and comparison:
+        before, after = comparison["before"], comparison["optimised"]
+        return [("Missed deadlines", before["misses"], after["misses"]),
+                ("Avg delay", f"+{round(before['delay'] / hit)} min", f"+{round(after['delay'] / hit)} min"),
+                ("Total km", f"{before['km']:.0f}", f"{after['km']:.0f}")]
     if not ba:
         return []
     return [("Missed deadlines", ba["misses_before"], ba["misses_after"]),
@@ -584,15 +590,16 @@ def alert_steps(ctx, issue):
                 for message in action.get("messages", []):
                     st.markdown(f"**To {escape(message['to'])}**")
                     st.code(message["text"], language=None, wrap_lines=True)
+    choice = plan_choice(ctx, issue, plan) if actions and plan.get("kind") == "ripple" else "rules"
     if issue["status"] == "analysed":
         with st.container(horizontal=True, gap="small"):
-            if st.button(
-                "Accept plan", type="primary", key=f"accept_{issue['issue_id']}", icon=":material/check_circle:"
-            ):
+            label = "Accept optimised plan" if choice == "optimised" else "Accept plan"
+            if st.button(label, type="primary", key=f"accept_{issue['issue_id']}", icon=":material/check_circle:"):
                 operations.accept(issue["issue_id"], decided_by=st.session_state.get("display_name", "Branch admin"),
-                                  branch_id=ctx["branch_id"])
+                                  branch_id=ctx["branch_id"], choice=choice)
                 st.session_state["last_applied"] = issue["issue_id"]
-                st.toast("Plan applied.", icon=":material/check_circle:")
+                st.toast("Optimised plan applied." if choice == "optimised" else "Plan applied.",
+                         icon=":material/check_circle:")
                 st.rerun()
             with st.popover("Modify", icon=":material/edit:"):
                 modify_form(ctx, issue, where="actions")
@@ -603,6 +610,71 @@ def alert_steps(ctx, issue):
                                       st.session_state.get("display_name", "Branch admin"), branch_id=ctx["branch_id"])
                     st.toast("Alert rejected.")
                     st.rerun()
+
+
+def plan_choice(ctx, issue, plan):
+    """Rule-based plan vs the OR-Tools optimised plan: the numbers side by side and which one to apply."""
+    iid = issue["issue_id"]
+    opt = plan.get("optimised") or {}
+    if not opt.get("available"):
+        st.caption(":material/route: Optimised plan: install OR-Tools to compare one. The rule-based plan stays.")
+        return "rules"
+    if opt.get("status") != "ok":
+        st.caption(f":material/route: No optimised plan ({escape(str(opt.get('note') or opt.get('status')))}). "
+                   "The rule-based plan stays.")
+        return "rules"
+    cmp = opt["comparison"]
+    keys = ("misses", "delay", "km")
+    better = tuple(cmp["optimised"][k] for k in keys) < tuple(cmp["rules"][k] for k in keys)
+    with ui.card(f"compare_{iid}"):
+        st.markdown("<p class='dp-h3'>Rule-based or optimised?</p>", unsafe_allow_html=True)
+        head = "".join(f"<th>{h}</th>" for h in ("", "No action", "Rule plan", "Optimised"))
+        body = ""
+        for label, key, unit in (("Missed deadlines", "misses", ""), ("Total delay", "delay", " min"),
+                                 ("Total km", "km", " km")):
+            values = [cmp["before"][key], cmp["rules"][key], cmp["optimised"][key]]
+            best = min(values[1:])
+            cells = "".join(f"<td class='{'best' if i and v == best else ''}'>{v:g}{unit}</td>"
+                            for i, v in enumerate(values))
+            body += f"<tr><th>{label}</th>{cells}</tr>"
+        st.markdown(f"<table class='dp-compare'><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>",
+                    unsafe_allow_html=True)
+        if better:
+            rules, best = cmp["rules"], cmp["optimised"]
+            gains = [text for gain, text in (
+                (rules["misses"] - best["misses"], f"{rules['misses'] - best['misses']} fewer missed"),
+                (rules["delay"] - best["delay"], f"{rules['delay'] - best['delay']:g} min less delay"),
+                (rules["km"] - best["km"], f"{rules['km'] - best['km']:.0f} km less driving")) if gain > 0]
+            st.caption(f":material/lightbulb: Optimised is better here: {', '.join(gains)}.")
+        pick = st.segmented_control(  # the rule plan stays the default; the admin decides
+            "Apply", ["rules", "optimised"], default="rules", key=f"choice_{iid}",
+            format_func=lambda c: "Rule plan" if c == "rules" else "Optimised (OR-Tools)",
+            label_visibility="collapsed")
+        names = ctx["partner_names"]
+        by_vehicle = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
+        with st.expander("Optimised routes", icon=":material/route:"):
+            for vehicle_id, stops in opt["routes"].items():
+                if not stops:
+                    continue
+                who = names.get(by_vehicle.get(vehicle_id), vehicle_id)
+                path = " → ".join(f"{s['delivery_id']} {s['eta']}" + (" ↩" if s["from"] != vehicle_id else "")
+                                  for s in stops)
+                st.markdown(f"**{escape(vehicle_id)} · {escape(who)}** <span class='dp-small'>{escape(path)}"
+                            f"</span>", unsafe_allow_html=True)
+            if opt.get("moves"):
+                st.caption("↩ = parcel moved from another vehicle (handover).")
+            if opt.get("dropped"):
+                st.warning(f"Left out (back to the queue): {', '.join(opt['dropped'])}", icon=":material/warning:")
+        search = "guided search" if opt.get("thorough") else "quick search"
+        info, more = st.columns([3, 1.2], vertical_alignment="center")
+        info.caption(f":material/memory: OR-Tools · {search} · {opt.get('seconds', 0):.2f} s · "
+                     f"{len(opt.get('moves') or [])} parcels moved")
+        if issue["status"] == "analysed" and not opt.get("thorough") and more.button(
+                "Improve (5 s)", icon=":material/tune:", key=f"improve_{iid}", width="stretch"):
+            with st.spinner("Searching for 5 seconds…"):
+                operations.improve(iid, ctx["branch_id"])
+            st.rerun()
+    return pick or "rules"
 
 
 # ---------------------------------------------------------------- history

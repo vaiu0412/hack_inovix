@@ -3,7 +3,7 @@ from html import escape
 
 import streamlit as st
 
-from modules import guards, partner_ui, ui
+from modules import escalation, escalation_ui, guards, partner_ui, ui
 from modules import partner_scope as scope
 
 guards.require_role("partner")
@@ -48,6 +48,9 @@ if unread:
 
 # ---------------------------------------------------------------- new work from the branch admin
 new_work = deliveries[deliveries["status"] == "assigned"].sort_values("eta_min")
+fresh = new_work[new_work["seen_at"].isna() & new_work["offer_status"].notna()]["delivery_id"].tolist()
+if fresh:
+    escalation.mark_seen(dp_id, branch, fresh)  # the partner has now seen these offers
 if len(new_work):
     with ui.card("new_work"):
         st.markdown(f"<p class='dp-h3'>{ui.icon('assignment')} New work · {len(new_work)}</p>", unsafe_allow_html=True)
@@ -55,7 +58,8 @@ if len(new_work):
             st.markdown(
                 f"<div class='dp-row'><div class='main'><b>{escape(d['delivery_id'])} · {escape(d['customer'])}</b>"
                 f"<small>{escape(d['address_area'])} · {escape(str(d.get('package_size') or 'small').capitalize())}"
-                f" · due {d['deadline']}</small></div><div class='end'>{partner_ui.stage_pill(d['status'])}</div>"
+                f" · due {d['deadline']}</small></div><div class='end'>{partner_ui.stage_pill(d['status'])} "
+                f"{escalation_ui.offer_pill(d.get('offer_status'))}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )

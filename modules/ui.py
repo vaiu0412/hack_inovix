@@ -249,7 +249,7 @@ def rec_card(action):
 
 # ---------------------------------------------------------------- saved preferences (filters, last page)
 PREF_KEYS = ("live_map_status", "live_map_kind", "live_map_road", "live_map_focus", "team_status", "team_kind",
-             "team_alerts", "del_state", "del_priority", "del_partner")
+             "team_alerts", "del_state", "del_priority", "del_partner", "del_not_accepted")
 
 
 def sync_prefs(user, page):

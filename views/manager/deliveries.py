@@ -4,7 +4,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import assign, guards, store, ui
+from modules import assign, escalation, escalation_ui, guards, store, ui
 from modules import manager_ui as mui
 
 guards.require_role("branch_admin")
@@ -21,6 +21,7 @@ deliveries = deliveries.assign(state=state, partner=deliveries["vehicle_id"].map
 ui.restore_pref("del_state", ["normal", "delayed", "critical", "done", "unassigned"], multi=True)
 ui.restore_pref("del_priority", ["medical", "perishable", "express", "standard"], multi=True)
 ui.restore_pref("del_partner", [None] + sorted(set(partner_of.values())))
+ui.restore_pref("del_not_accepted", [True, False])
 with st.container(horizontal=True, vertical_alignment="center", gap="small"):
     query = st.text_input("Search", placeholder="Customer, area, ID", label_visibility="collapsed",
                           icon=":material/search:", width=240)
@@ -36,6 +37,7 @@ with st.container(horizontal=True, vertical_alignment="center", gap="small"):
         format_func=lambda p: "All partners" if p is None else f"{p} · {ctx['partner_names'][p]}",
         label_visibility="collapsed",
     )
+    not_accepted = st.toggle("Not accepted", key="del_not_accepted")
 view = deliveries
 if query:
     hay = (view["customer"] + " " + view["address_area"] + " " + view["delivery_id"]).str.lower()
@@ -46,10 +48,14 @@ if priority_pick:
     view = view[view["priority"].isin(priority_pick)]
 if partner_pick:
     view = view[view["partner"] == partner_pick]
+if not_accepted:  # offered but not accepted yet, or handed back
+    view = view[view["offer_status"].isin([*escalation.LIVE, *escalation.NEEDS_ADMIN])
+                & view["status"].isin(["assigned", "unassigned"])]
 
 table = pd.DataFrame({"ID": view["delivery_id"], "Customer": view["customer"], "Area": view["address_area"],
                       "Priority": view["priority"].str.capitalize(), "Partner": view["partner"],
                       "Stage": view["status"].map(assign.STAGE).fillna(view["status"]),
+                      "Offer": view["offer_status"].map(escalation_ui.offer_text),
                       "ETA": view["planned_eta"].fillna("—"), "Due": view["deadline"],
                       "Status": view["state"].map(ui.status_text), "Change": view["note"].fillna("").str.capitalize()})
 table_col, panel_col = st.columns([2.2, 1], gap="medium")
@@ -72,8 +78,12 @@ with panel_col, ui.card("delivery_panel"):
                            ("Size", escape(str(d.get("package_size") or "small").capitalize())),
                            ("ETA", escape(d["planned_eta"] or "—")), ("Due", escape(d["deadline"])),
                            ("Change", escape(str(d["note"] or "—").capitalize()))]), unsafe_allow_html=True)
+        if d["offer_status"]:
+            st.markdown(f"<div style='margin:0 0 8px'>{escalation_ui.offer_pill(d['offer_status'])}</div>",
+                        unsafe_allow_html=True)
         st.link_button("Call customer", f"tel:{d['customer_phone']}", icon=":material/call:", width="stretch")
         mui.reassign_controls(ctx, d.to_dict())
+        escalation_ui.timeline(d["delivery_id"], ctx["branch_id"])
 
 sms = store.customer_messages(branch_id=ctx["branch_id"])
 with st.expander(f"SMS sent ({len(sms)})", icon=":material/sms:"):

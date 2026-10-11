@@ -1,7 +1,7 @@
 """Command Center: the open alert, today's numbers, the map and what is at risk now."""
 import streamlit as st
 
-from modules import guards, ui
+from modules import escalation_ui, guards, ui
 from modules import manager_ui as mui
 
 guards.require_role("branch_admin")
@@ -9,6 +9,7 @@ ui.header("Command Center")
 ctx = mui.context()
 
 mui.alert_banner(ctx)
+escalation_ui.admin_alerts(ctx)
 mui.kpi_tiles(ctx)
 
 map_col, side_col = st.columns([1.6, 1], gap="medium")

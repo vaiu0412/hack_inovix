@@ -296,6 +296,9 @@ def order_card(ctx, order, found):
                     f"<p class='dp-small'>{escape(order['address_area'])} · {escape(order['priority'].capitalize())} · "
                     f"{escape(str(order.get('package_size') or 'small').capitalize())} · due {due}</p>",
                     unsafe_allow_html=True)
+        if order.get("offer_status") == "declined":
+            st.markdown(f"{ui.pill_html('critical', 'Declined')} <span class='dp-small'>back from the partner – "
+                        "pick someone else</span>", unsafe_allow_html=True)
         best = found[0] if found else None
         if best:
             st.markdown(

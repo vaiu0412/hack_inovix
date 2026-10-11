@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from streamlit_folium import st_folium
 
-from modules import assign, guards, ui
+from modules import assign, escalation_ui, guards, ui
 from modules import manager_ui as mui
 
 guards.require_role("branch_admin")
@@ -19,11 +19,13 @@ queue = assign.unassigned_orders(branch)
 done = st.session_state.pop("assign_msg", None)
 if done:
     st.success(done, icon=":material/check_circle:")
+escalation_ui.admin_alerts(ctx)  # not accepted in time / can't take -> reassign in one click
 
 tab_queue, tab_new, tab_csv, tab_load = st.tabs([f"Queue ({len(queue)})", "New order", "Upload CSV", "Workload"])
 
 # ---------------------------------------------------------------- queue
 with tab_queue:
+    escalation_ui.settings_caption()
     if queue.empty:
         with ui.card("queue_empty"):
             ui.empty_state("inventory_2", "No unassigned orders.")

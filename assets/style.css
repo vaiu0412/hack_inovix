@@ -243,6 +243,26 @@ button:disabled { opacity: .45 !important; }
   [data-testid="stExpander"] details { background: rgba(15,23,42,.94) !important; }
 }
 
+/* ---------- order offers: full-screen urgent card (partner) and red alerts (admin) */
+.st-key-offer_overlay { position: fixed; inset: 0; z-index: 1000001; overflow-y: auto; justify-content: center;
+  padding: 24px max(16px, calc(50vw - 230px)); gap: 12px !important;
+  background: radial-gradient(circle at 50% 30%, rgba(244,63,94,.22), transparent 60%), rgba(7,11,20,.96);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.dp-offer { text-align: center; }
+.dp-offer .ring { width: 84px; height: 84px; margin: 0 auto 14px; border-radius: 50%; display: grid;
+  place-items: center; background: rgba(244,63,94,.18); color: var(--dp-ink-critical);
+  animation: dp-offer-pulse 1.2s ease-out infinite; }
+@keyframes dp-offer-pulse { from { box-shadow: 0 0 0 0 rgba(244,63,94,.55); } to { box-shadow: 0 0 0 26px rgba(244,63,94,0); } }
+.dp-offer .kicker { font-size: 13px; font-weight: 800; letter-spacing: .12em; color: var(--dp-ink-critical); margin: 0 0 6px; }
+.dp-offer .title { font-size: 30px; font-weight: 800; color: var(--dp-text); margin: 0; letter-spacing: -.02em; }
+.dp-offer .who { font-size: 20px; font-weight: 700; color: var(--dp-text); margin: 4px 0 2px; }
+.dp-offer .where { color: var(--dp-body); margin: 0 0 10px; }
+.dp-offer .say { font-size: 18px; color: var(--dp-text); line-height: 1.45; margin: 0 0 8px; }
+.st-key-offer_overlay .stButton button { min-height: 60px; font-size: 18px; border-radius: 16px; }
+[class*="st-key-esc_alert_"] { border: 1px solid rgba(244,63,94,.55); background: rgba(244,63,94,.10);
+  border-radius: 16px; padding: 14px 16px; margin-bottom: 10px; box-shadow: 0 0 24px rgba(244,63,94,.18); }
+.dp-esc { color: var(--dp-text); line-height: 1.5; }
+
 /* ---------- phones: lighter blur, 16px gutters, 2 KPI tiles per row, big full-width buttons, no sideways scroll */
 @media (max-width: 768px) { :root { --dp-blur: 8px; } }
 @media (max-width: 640px) {
@@ -259,6 +279,6 @@ button:disabled { opacity: .45 !important; }
   .stFormSubmitButton, .stFormSubmitButton button { width: 100% !important; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dp-count, [data-testid="stMainBlockContainer"], .dp-s-critical i, .dp-skel { animation: none !important; }
+  .dp-count, [data-testid="stMainBlockContainer"], .dp-s-critical i, .dp-skel, .dp-offer .ring { animation: none !important; }
   [class*="st-key-card"], .dp-card, .dp-kpi { transition: none; }
 }

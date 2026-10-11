@@ -10,7 +10,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from modules import guards, ui
+from modules import escalation_ui, guards, ui
 from modules.guards import BRANCH_PAGES as B
 from modules.guards import PARTNER_PAGES as P
 from modules.guards import SUPER_PAGES as S
@@ -71,7 +71,10 @@ if last_page and role != "partner" and navigation.url_path == "" and last_page !
         st.switch_page(target)
 ui.sidebar_user()
 ui.live_updates()  # one refresh watcher for every page, at a fixed place in the sidebar
+escalation_ui.watcher(user)  # order offers: ring / call / alert timer (+ the partner's alarm), also in the sidebar
 if "_welcome" in st.session_state:
     st.toast(st.session_state.pop("_welcome"))
+if role == "partner":
+    escalation_ui.partner_overlay(user)  # full-screen card while an urgent order waits for Accept
 navigation.run()
 ui.mark_seen()  # this session's own writes don't trigger a refresh (one-time messages and passwords stay visible)

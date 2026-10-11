@@ -1,8 +1,8 @@
 """Partner-side delivery steps: Accept -> Picked up -> Start -> Delivered (one button at a time, no skipping),
-plus "Can't deliver", which opens Report with the delivery already filled in."""
+plus "Can't take" for a new offer (back to the admin) and "Can't deliver", which opens Report already filled in."""
 import streamlit as st
 
-from modules import assign, guards, ui
+from modules import assign, escalation_ui, guards, ui
 from modules import partner_scope as scope
 from modules.report_ui import prefill
 
@@ -47,6 +47,10 @@ def step_buttons(dp_id, branch, delivery, key):
         except (ValueError, PermissionError) as error:
             st.toast(str(error), icon=":material/error:")
         st.rerun()
+    if delivery["status"] == "assigned":  # still an offer: hand it back with a reason
+        with cant:
+            escalation_ui.cant_take(dp_id, branch, delivery, key)
+        return
     if cant.button("Can't deliver", icon=":material/block:", width="stretch", key=f"cant_{key}"):
         prefill(f"partner_{dp_id}", "customer", f"Can't deliver {delivery['delivery_id']} ({delivery['customer']}): ")
         st.switch_page(guards.PARTNER_PAGES["report"])

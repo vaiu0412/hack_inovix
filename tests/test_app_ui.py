@@ -242,3 +242,45 @@ def test_assign_work_end_to_end(db):
     ok(at.switch_page(guards.PARTNER_PAGES["deliveries"]).run())          # every stop with its next step
     click(at, "Picked up")
     assert store.deliveries_df().set_index("delivery_id").loc[order_id, "status"] == "picked_up"
+
+
+def test_urgent_order_card_cant_take_and_one_click_reassign(db):
+    """An urgent order fills the partner's screen; Can't take alerts the admin, who reassigns it to the suggested
+    partner in one click; Deliveries shows the offer chip."""
+    from modules import assign
+
+    east = auth.get_user("east.admin")
+    order_id, _ = assign.create_order(east, "City Clinic", "+91 90000 30002", "Peelamedu", "Medicine", "medical",
+                                      "16:00", "small")
+    assign.assign(east, order_id, "DP102")
+    offer = lambda: store.deliveries_df().set_index("delivery_id").loc[order_id]  # noqa: E731
+
+    at = sign_in("DP102", "Partner@123")
+    assert "NEW URGENT ORDER" in text_of(at) and f"{order_id} · Medicine" in text_of(at)
+    assert offer()["offer_status"] == "seen"
+    click(at, "Can't take")
+    at.button_group(key=f"decline_reason_{order_id}").set_value("Too far").run()
+    click(at, "Send")
+    assert offer()["offer_status"] == "declined" and offer()["status"] == "unassigned"
+
+    page = _page_as(guards.BRANCH_PAGES["command"], east)
+    assert "Karthik can" in text_of(page) and "take it · Too far" in text_of(page)   # apostrophe is escaped
+    click(page, "Reassign to")
+    assert offer()["offer_status"] == "sent" and offer()["vehicle_id"] != "V2"
+
+    page = _page_as(guards.BRANCH_PAGES["deliveries"], east)
+    assert "📨 Sent" in page.dataframe[0].value["Offer"].tolist()
+
+
+def test_accepting_the_urgent_card_ends_the_alarm(db):
+    from modules import assign
+
+    east = auth.get_user("east.admin")
+    order_id, _ = assign.create_order(east, "KMCH Pharmacy", "+91 90000 30003", "Peelamedu", "Medicine", "medical",
+                                      "15:00", "small")
+    assign.assign(east, order_id, "DP102")
+    at = sign_in("DP102", "Partner@123")
+    click(at, "Accept")
+    row = store.deliveries_df().set_index("delivery_id").loc[order_id]
+    assert row["status"] == "accepted" and row["offer_status"] == "accepted"
+    assert "NEW URGENT ORDER" not in text_of(continue_session(at))

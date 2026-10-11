@@ -2,13 +2,14 @@
 
 analyse()  – impact + risk + recovery plan for a reported issue, explained the way a senior
              dispatcher would say it.
-accept()   – apply the plan everywhere: deliveries, ETAs, routes, partner inboxes, customer SMS.
+accept()   – apply the plan everywhere: deliveries, ETAs, routes, partner inboxes, customer SMS. The admin picks
+             the rule-based plan or the OR-Tools optimised one (modules/optimizer.py), shown side by side.
 reject()   – close the issue and tell the reporter why.
 """
 import json
 import re
 
-from modules import store
+from modules import optimizer, store
 from modules.data_loader import min_to_hhmm
 from modules.impact import NO_RIPPLE_TYPES, compute_impact
 from modules.issues import set_location, summarize, type_label
@@ -84,7 +85,36 @@ def _ripple_plan(problem, data, branch_id=None):
         "via_roads": sorted({r for a in actions for r in a.get("via_roads", [])}),
     }
     plan["note"] = dispatcher_note(problem, plan, data)
+    plan["optimised"] = _optimised(data, risk, [*store.active_disruptions(branch_id), disruption], branch_id, plan)
     return plan
+
+
+def _optimised(data, risk, disruptions, branch_id, plan, thorough=False):
+    """The OR-Tools alternative; any failure leaves the rule-based plan as the only one."""
+    if not len(risk):
+        return {"available": optimizer.available(), "status": "nothing to optimise", "routes": {}}
+    try:
+        partners = store.partners_df(branch_id).to_dict("records")
+        return optimizer.optimise(data, risk, disruptions, partners, plan, thorough=thorough,
+                                  time_limit_s=optimizer.TIME_LIMIT_S)
+    except Exception as error:  # the rule-based plan is always there
+        return {"available": optimizer.available(), "status": "failed", "note": str(error)[:200], "routes": {}}
+
+
+def improve(issue_id, branch_id=None):
+    """Search longer (guided local search, 5 s) for a better optimised plan and save it. Returns it."""
+    issue = _issue_in_branch(issue_id, branch_id)
+    plan = issue.get("plan") or {}
+    if plan.get("kind") != "ripple" or issue["status"] != "analysed":
+        raise ValueError("Only an open alert with a ripple can be optimised")
+    data = store.snapshot(issue["branch_id"])
+    disruption = plan["disruption"]
+    impact, _ = compute_impact(disruption, data)
+    risk = score_risk(impact, disruption)
+    others = [d for d in store.active_disruptions(issue["branch_id"])]
+    plan["optimised"] = _optimised(data, risk, [*others, disruption], issue["branch_id"], plan, thorough=True)
+    store.update_issue(issue_id, plan=plan)
+    return plan["optimised"]
 
 
 def _single_stop_plan(problem, data):
@@ -214,8 +244,8 @@ def _issue_in_branch(issue_id, branch_id):
     return issue
 
 
-def accept(issue_id, decided_by="Manager", branch_id=None):
-    """Apply the plan to the issue's own branch only. Returns a short summary of what changed.
+def accept(issue_id, decided_by="Manager", branch_id=None, choice="rules"):
+    """Apply the chosen plan ("rules" or "optimised") to the issue's own branch only. Returns a short summary.
 
     branch_id: the decider's branch (from the session); another branch's issue raises PermissionError.
     """
@@ -224,57 +254,30 @@ def accept(issue_id, decided_by="Manager", branch_id=None):
     plan = issue.get("plan")
     if not plan or plan["kind"] == "needs_location":
         raise ValueError("This issue has no plan yet")
+    optimised = plan.get("optimised") or {}
+    if choice == "optimised" and not (optimised.get("status") == "ok" and optimised.get("routes")):
+        raise ValueError("There is no optimised plan for this alert")
     # one transaction: deliveries, routes, messages, the block, the issue and the log change together or not at all
     with store.transaction():
         partner_by_vehicle = {p["vehicle_id"]: p for p in store.partners_df(branch).to_dict("records")}
         changed = {"deliveries": 0, "partners_told": set(), "customers_told": 0}
+        if choice == "optimised":
+            messages = _apply_optimised(plan, branch, partner_by_vehicle, changed)
+        else:
+            messages = _apply_rules(plan, branch, partner_by_vehicle, changed)
 
-        # 1) deliveries: new vehicle, ETA, deadline, stop order
-        backup_stops = {}
-        for row in plan["after"]:
-            fields = {"vehicle_id": row["vehicle_id"], "planned_eta": row["new_eta"], "deadline": row["deadline"],
-                      "note": row["action"]}
-            if row["action"] == "reassigned":
-                backup_stops.setdefault(row["vehicle_id"], []).append(row)
-            if "stop_order" in row:
-                fields["stop_order"] = row["stop_order"]
-            store.update_delivery(row["delivery_id"], branch_id=branch, **fields)
-            changed["deliveries"] += 1
-        for vehicle_id, rows in backup_stops.items():  # backup van: stops in ETA order
-            for order, row in enumerate(sorted(rows, key=lambda r: r["new_eta"]), start=1):
-                store.update_delivery(row["delivery_id"], branch_id=branch, stop_order=order)
-            partner = partner_by_vehicle.get(vehicle_id)
-            if partner and partner["status"] != "on_duty":
-                store.set_partner_status(partner["partner_id"], "on_duty")
-
-        # 2) routes: blocked road replaced by the detour
-        blocked = (plan.get("disruption") or {}).get("road_id")
-        vehicles = store.vehicles_df(branch).set_index("vehicle_id")
-        for action in plan["actions"]:
-            if action["action_type"] == "reroute" and blocked and action.get("via_roads"):
-                vid = action["target"].replace("vehicle ", "")
-                route = [action["via_roads"][0] if r == blocked else r for r in vehicles.loc[vid, "route_roads"]]
-                store.set_route(vid, list(dict.fromkeys(route)), branch_id=branch)
-
-        # 3) messages: partner inboxes and customer SMS
-        for action in plan["actions"]:
-            for message in action.get("messages", []):
-                if message.get("kind") == "driver":
-                    partner = partner_by_vehicle.get(message.get("vehicle_id"))
-                    if partner:
-                        store.add_message(message["text"], to_partner=partner["partner_id"], issue_id=issue_id,
-                                          branch_id=branch)
-                        changed["partners_told"].add(partner["partner_id"])
-                elif message.get("kind") == "customer":
-                    store.add_message(
-                        message["text"],
-                        to_customer=message.get("customer"),
-                        to_phone=message.get("phone"),
-                        channel="sms",
-                        issue_id=issue_id,
-                        branch_id=branch,
-                    )
-                    changed["customers_told"] += 1
+        # messages: partner inboxes and customer SMS
+        for message in messages:
+            if message.get("kind") == "driver":
+                partner = partner_by_vehicle.get(message.get("vehicle_id"))
+                if partner:
+                    store.add_message(message["text"], to_partner=partner["partner_id"], issue_id=issue_id,
+                                      branch_id=branch)
+                    changed["partners_told"].add(partner["partner_id"])
+            elif message.get("kind") == "customer":
+                store.add_message(message["text"], to_customer=message.get("customer"), to_phone=message.get("phone"),
+                                  channel="sms", issue_id=issue_id, branch_id=branch)
+                changed["customers_told"] += 1
         reporter = issue.get("partner_id")
         if (
             reporter
@@ -284,19 +287,82 @@ def accept(issue_id, decided_by="Manager", branch_id=None):
             store.add_message(f"Thanks, your report was handled: {plan['headline']}.", to_partner=reporter,
                               issue_id=issue_id, branch_id=branch)
 
-        # 4) the road stays blocked for future plans; close the issue; refresh other open plans
-        if plan["kind"] == "ripple" and plan.get("disruption", {}).get("road_id") and \
-                plan["disruption"]["type"] not in ("breakdown",) + NO_RIPPLE_TYPES:
+        # the road stays blocked for future plans; close the issue; refresh other open plans
+        road_block = (plan.get("disruption", {}).get("road_id")
+                      and plan["disruption"]["type"] not in ("breakdown",) + NO_RIPPLE_TYPES)
+        if plan["kind"] == "ripple" and road_block:
             store.add_disruption(issue_id, plan["disruption"], branch_id=branch)
-        store.update_issue(
-            issue_id, status="accepted", decided_at=store.now_stamp(), decision_note=f"Accepted by {decided_by}"
-        )
-        text = (f"{decided_by} accepted the plan for #{issue_id}: {changed['deliveries']} deliveries updated, "
+        which = "the optimised plan" if choice == "optimised" else "the plan"
+        plan["chosen"] = choice
+        store.update_issue(issue_id, plan=plan, status="accepted", decided_at=store.now_stamp(),
+                           decision_note=f"Accepted {which} by {decided_by}")
+        text = (f"{decided_by} accepted {which} for #{issue_id}: {changed['deliveries']} deliveries updated, "
                 f"{len(changed['partners_told'])} partners and {changed['customers_told']} customers notified")
         store.log_event("decision", text, issue_id, branch_id=branch)
     for other in store.list_issues(("analysed",), branch_id=branch):
         analyse(other["issue_id"])  # the branch changed, so its other plans must too
     return text
+
+
+def _apply_rules(plan, branch, partner_by_vehicle, changed):
+    """Rule-based plan: deliveries (new vehicle, ETA, stop order), reroutes. Returns the messages to send."""
+    backup_stops = {}
+    for row in plan["after"]:
+        fields = {"vehicle_id": row["vehicle_id"], "planned_eta": row["new_eta"], "deadline": row["deadline"],
+                  "note": row["action"]}
+        if row["action"] == "reassigned":
+            backup_stops.setdefault(row["vehicle_id"], []).append(row)
+        if "stop_order" in row:
+            fields["stop_order"] = row["stop_order"]
+        store.update_delivery(row["delivery_id"], branch_id=branch, **fields)
+        changed["deliveries"] += 1
+    for vehicle_id, rows in backup_stops.items():  # backup van: stops in ETA order
+        for order, row in enumerate(sorted(rows, key=lambda r: r["new_eta"]), start=1):
+            store.update_delivery(row["delivery_id"], branch_id=branch, stop_order=order)
+        _on_duty(partner_by_vehicle.get(vehicle_id))
+    blocked = (plan.get("disruption") or {}).get("road_id")  # routes: blocked road replaced by the detour
+    vehicles = store.vehicles_df(branch).set_index("vehicle_id")
+    for action in plan["actions"]:
+        if action["action_type"] == "reroute" and blocked and action.get("via_roads"):
+            vid = action["target"].replace("vehicle ", "")
+            route = [action["via_roads"][0] if r == blocked else r for r in vehicles.loc[vid, "route_roads"]]
+            store.set_route(vid, list(dict.fromkeys(route)), branch_id=branch)
+    return [m for action in plan["actions"] for m in action.get("messages", [])]
+
+
+def _apply_optimised(plan, branch, partner_by_vehicle, changed):
+    """OR-Tools plan: every stop in scope gets its vehicle, ETA and order; left-out stops go back to the queue;
+    vehicles avoid the blocked road. Returns the messages to send."""
+    optimised = plan["optimised"]
+    for vehicle_id, stops in optimised["routes"].items():
+        for stop in stops:
+            moved = stop["from"] != vehicle_id
+            store.update_delivery(stop["delivery_id"], branch_id=branch, vehicle_id=vehicle_id,
+                                  planned_eta=stop["eta"], stop_order=stop["stop_order"],
+                                  note="moved" if moved else "resequenced" if stop["eta_min"] != stop["planned_min"]
+                                  else "")
+            changed["deliveries"] += 1
+        if stops:
+            _on_duty(partner_by_vehicle.get(vehicle_id))
+    for delivery_id in optimised.get("dropped", []):
+        store.update_delivery(delivery_id, branch_id=branch, vehicle_id=None, status="unassigned", planned_eta=None,
+                              stop_order=0, note="left out")
+        changed["deliveries"] += 1
+    vehicles = store.vehicles_df(branch).set_index("vehicle_id")
+    for road, detour in (optimised.get("detours") or {}).items():
+        if not detour.get("via"):
+            continue
+        for vid in optimised["routes"]:
+            route = vehicles.loc[vid, "route_roads"] if vid in vehicles.index else []
+            if road in route:
+                store.set_route(vid, list(dict.fromkeys(detour["via"] if r == road else r for r in route)),
+                                branch_id=branch)
+    return optimised.get("messages", [])
+
+
+def _on_duty(partner):
+    if partner and partner["status"] != "on_duty":
+        store.set_partner_status(partner["partner_id"], "on_duty")
 
 
 def reject(issue_id, reason="Not needed", decided_by="Manager", branch_id=None):

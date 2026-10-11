@@ -24,11 +24,13 @@ from modules import geometry
 from modules.data_loader import DATA_DIR, hhmm_to_min, load_all, load_branches, load_partners, nearest_place
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 ORDER_COLUMNS = {  # work assignment (v6): who created / assigned / handled an order, and when
     "created_by": "TEXT", "created_at": "TEXT", "assigned_at": "TEXT", "assigned_by": "TEXT", "accepted_at": "TEXT",
     "picked_at": "TEXT", "delivered_at": "TEXT", "package_size": "TEXT DEFAULT 'small'", "category": "TEXT",
     "notes": "TEXT DEFAULT ''", "proof_note": "TEXT DEFAULT ''"}
+OFFER_COLUMNS = {  # order offers and escalation (v7): sent -> seen -> ringing -> calling -> accepted / declined / ...
+    "offer_status": "TEXT", "offered_at": "TEXT", "seen_at": "TEXT", "escalation_level": "INTEGER DEFAULT 0"}
 SEED_SIZE = {"bike": "small", "car": "small", "van": "medium", "truck": "large"}
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS branches (
@@ -49,7 +51,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
     priority TEXT, customer_phone TEXT, status TEXT DEFAULT 'in_transit', original_vehicle TEXT,
     note TEXT DEFAULT '', branch_id TEXT, created_by TEXT, created_at TEXT, assigned_at TEXT, assigned_by TEXT,
     accepted_at TEXT, picked_at TEXT, delivered_at TEXT, package_size TEXT DEFAULT 'small', category TEXT,
-    notes TEXT DEFAULT '', proof_note TEXT DEFAULT '');
+    notes TEXT DEFAULT '', proof_note TEXT DEFAULT '', offer_status TEXT, offered_at TEXT, seen_at TEXT,
+    escalation_level INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS assignment_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_id TEXT NOT NULL, from_dp TEXT, to_dp TEXT, by_user TEXT,
     reason TEXT, time TEXT, branch_id TEXT);
@@ -85,14 +88,18 @@ CREATE TABLE IF NOT EXISTS drafts (
 CREATE TABLE IF NOT EXISTS user_prefs (
     user_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT, updated_at TEXT, PRIMARY KEY (user_id, key));
 CREATE TABLE IF NOT EXISTS route_geometry (key TEXT PRIMARY KEY, points TEXT NOT NULL, source TEXT, meta TEXT);
+CREATE TABLE IF NOT EXISTS escalations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_id TEXT NOT NULL, dp_id TEXT, level INTEGER, channel TEXT,
+    time TEXT, result TEXT, details TEXT, branch_id TEXT);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by TEXT);
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, actor_user_id TEXT, action TEXT, target TEXT,
     details_json TEXT, branch_id TEXT);
 """
 TABLES = ["branches", "roles", "permissions", "role_permissions", "partners", "vehicles", "deliveries", "issues",
           "disruptions", "messages", "events", "meta", "users", "sessions", "otp_codes", "audit_log",
-          "login_attempts", "drafts", "user_prefs", "assignment_history"]
-BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events"]
+          "login_attempts", "drafts", "user_prefs", "assignment_history", "escalations"]  # settings survive a reset
+BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events", "escalations"]
 ACTIVE_DONE = ("delivered", "failed")
 JSON_FIELDS = {"problem", "plan"}
 OPEN_ISSUE_STATUSES = ("new", "analysed")
@@ -255,6 +262,8 @@ def init_db():
             _migrate_v5(conn)
         if current < 6:
             _migrate_v6(conn)
+        if current < 7:
+            _migrate_v7(conn)
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:  # data but no accounts: add the demo ones
             _seed_users(conn)
             conn.execute("INSERT INTO audit_log(time, actor_user_id, action, target, details_json) VALUES (?,?,?,?,?)",
@@ -391,6 +400,15 @@ def _migrate_v6(conn):
         "'small') WHERE package_size IS NULL OR package_size = ''"
     )
     _set_version(conn, 6)
+
+
+def _migrate_v7(conn):
+    """Order offers and escalation: offer columns on deliveries (the tables come from SCHEMA)."""
+    have = _columns(conn, "deliveries")
+    for column, kind in OFFER_COLUMNS.items():
+        if column not in have:
+            conn.execute(f"ALTER TABLE deliveries ADD COLUMN {column} {kind}")
+    _set_version(conn, 7)
 
 
 def _set_version(conn, version):
@@ -730,6 +748,40 @@ def clear_draft(user_id, form):
     """Delete a user's draft once the form is sent."""
     with connect() as conn:
         conn.execute("DELETE FROM drafts WHERE user_id = ? AND form = ?", (user_id, form))
+
+
+def get_setting(key, default=None):
+    """One app setting (escalation times …) as text, or the default."""
+    with connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def all_settings():
+    """Every saved app setting as {key: text}."""
+    with connect() as conn:
+        return {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
+
+
+def set_setting(key, value, updated_by="system"):
+    """Save one app setting (kept when the demo data is reset)."""
+    with connect() as conn:
+        conn.execute("INSERT INTO settings(key, value, updated_at, updated_by) VALUES (?,?,?,?) "
+                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, "
+                     "updated_by = excluded.updated_by", (key, str(value), now_iso(), updated_by))
+        _bump(conn)
+
+
+def escalations_df(delivery_id=None, branch_id=None, limit=200):
+    """Offer and escalation steps (sent, seen, ringing, call, alert, answer), newest first."""
+    clauses, params = [], []
+    if delivery_id:
+        clauses.append("delivery_id = ?")
+        params.append(delivery_id)
+    if branch_id:
+        clauses.append("branch_id = ?")
+        params.append(branch_id)
+    return _df("SELECT * FROM escalations" + _where(clauses) + " ORDER BY id DESC LIMIT ?", (*params, limit))
 
 
 def get_prefs(user_id):

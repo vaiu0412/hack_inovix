@@ -6,25 +6,51 @@ Docs:  http://localhost:8000/docs   (click "Authorize" and paste the token from 
 Auth:  POST /login {identifier, password, super_console?} -> {"token": ...} (a server-side session,
        only its hash is stored); send "Authorization: Bearer <token>"; POST /logout revokes it.
 Roles: Super Admin   -> /branches (summaries), /demo/reset
-       Branch Admin  -> /kpis, /partners, /deliveries, /map, /issues… – own branch only
+       Branch Admin  -> /kpis, /partners, /deliveries, /map, /issues, /escalations – own branch only
        Delivery Partner -> /me… – own data only; dp_id and branch come from the session
+Calls: /twilio/voice and /twilio/gather are Twilio webhooks (signed requests only), see docs/AI_CALL.md.
+       A background task moves order offers along every 20 s (ESCALATION_SCHEDULER=off disables it).
 """
+import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from modules import auth, issues, operations, partner_scope, store
+from modules import auth, escalation, issues, operations, partner_scope, store
 from modules.data_loader import load_all
+from modules.parser import setting
+from services import voice_call
+
+log = logging.getLogger("deport.api")
+ESCALATION_EVERY_SEC = 20
+
+
+async def _escalation_loop():
+    """Move order offers along even when no Streamlit page is open."""
+    while True:
+        await asyncio.sleep(ESCALATION_EVERY_SEC)
+        try:
+            changes = await asyncio.to_thread(escalation.tick)
+            if changes:
+                log.info("escalation: %s", changes)
+        except Exception:  # keep the loop alive; the next tick tries again
+            log.exception("escalation tick failed")
 
 
 @asynccontextmanager
 async def lifespan(_app):
-    """Create or upgrade the database when the API starts."""
+    """Create or upgrade the database when the API starts, and run the escalation timer."""
     store.init_db()
+    task = None
+    if str(setting("ESCALATION_SCHEDULER", "on")).lower() != "off":
+        task = asyncio.create_task(_escalation_loop())
     yield
+    if task:
+        task.cancel()
 
 
 app = FastAPI(title="DEPORT API", version="4.0", lifespan=lifespan,
@@ -96,6 +122,12 @@ class IssueEdit(BaseModel):
     road_id: str | None = None
     severity: str | None = None
     duration_min: int | None = None
+
+
+class DeclineIn(BaseModel):
+    """Why the partner can't take an order."""
+
+    reason: str = "Other"
 
 
 class Decision(BaseModel):
@@ -222,6 +254,23 @@ def deliver(delivery_id: str, user=Depends(partner_only)):
     return {"ok": True, "changed": changed}
 
 
+@app.get("/me/offers")
+def my_offers(user=Depends(partner_only)):
+    """Orders offered to the partner that still need Accept / Can't take."""
+    return _clean(escalation.partner_offers(user["dp_id"], user["branch_id"]))
+
+
+@app.post("/me/deliveries/{delivery_id}/decline")
+def decline(delivery_id: str, body: DeclineIn, user=Depends(partner_only)):
+    """Can't take an offered order: it goes back to the queue and the admin is alerted."""
+    try:
+        result = _forbidden(lambda: escalation.respond(user["dp_id"], user["branch_id"], delivery_id, False,
+                                                      reason=body.reason))
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"ok": True, "offer": result}
+
+
 @app.post("/me/deliveries/{delivery_id}/{step}")
 def advance(delivery_id: str, step: str, user=Depends(partner_only)):
     """step: accepted | picked_up | in_transit (Accept -> Picked up -> Start), in order."""
@@ -332,6 +381,12 @@ def live_map(user=Depends(branch_admin_only)):
     }
 
 
+@app.get("/escalations")
+def escalations(user=Depends(branch_admin_only)):
+    """Orders nobody accepted in time or a partner can't take, each with the suggested partner."""
+    return _clean(escalation.admin_alerts(user["branch_id"]))
+
+
 @app.get("/issues")
 def list_issues(open: bool = False, user=Depends(branch_admin_only)):
     """Issues of the branch; open=true for the ones still waiting."""
@@ -397,3 +452,46 @@ def reject(issue_id: int, body: Decision, user=Depends(branch_admin_only)):
     _issue_or_404(issue_id, user["branch_id"])
     operations.reject(issue_id, body.reason, user["display_name"], branch_id=user["branch_id"])
     return _public(store.get_issue(issue_id))
+
+
+# ---------------------------------------------------------------- Twilio voice webhooks (signed requests only)
+async def _twilio_form(request):
+    """The POSTed form, after checking X-Twilio-Signature against PUBLIC_BASE_URL + path + query."""
+    form = {k: str(v) for k, v in (await request.form()).items()}
+    base = str(setting("PUBLIC_BASE_URL", "")).rstrip("/")
+    url = f"{base}{request.url.path}" + (f"?{request.url.query}" if request.url.query else "")
+    if not voice_call.valid_request(url, form, request.headers.get("X-Twilio-Signature", "")):
+        raise HTTPException(403, "Invalid Twilio signature")
+    return form
+
+
+def _twiml(text):
+    return Response(content=text, media_type="application/xml")
+
+
+@app.post("/twilio/voice", tags=["twilio"])
+async def twilio_voice(request: Request, delivery_id: str, dp_id: str):
+    """The call script (TwiML): the offer, then one key – 1 accept, 2 can't take (speech works too)."""
+    await _twilio_form(request)
+    offer = escalation.call_offer(delivery_id, dp_id)
+    if offer is None:
+        return _twiml(voice_call.twiml_say("This order is no longer waiting for you. Goodbye."))
+    gather = voice_call.webhook_url("/twilio/gather", delivery_id, dp_id)
+    return _twiml(voice_call.twiml_offer(escalation.call_message(offer), gather))
+
+
+@app.post("/twilio/gather", tags=["twilio"])
+async def twilio_gather(request: Request, delivery_id: str, dp_id: str):
+    """The partner's answer on the call; updates the order in one transaction."""
+    form = await _twilio_form(request)
+    answer = voice_call.read_answer(form.get("Digits"), form.get("SpeechResult"))
+    if answer is None:
+        again = voice_call.webhook_url("/twilio/voice", delivery_id, dp_id)
+        return _twiml(voice_call.twiml_say("Sorry, I did not get that.", redirect_url=again))
+    try:
+        escalation.respond_by_call(delivery_id, dp_id, answer)
+    except (PermissionError, ValueError):
+        return _twiml(voice_call.twiml_say("This order is no longer waiting for you. Goodbye."))
+    if answer == "accept":
+        return _twiml(voice_call.twiml_say("Thank you. The order is yours. Drive safe."))
+    return _twiml(voice_call.twiml_say("Okay. We will give it to someone else. Thank you."))

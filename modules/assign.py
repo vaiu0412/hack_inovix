@@ -9,6 +9,7 @@
   (cheapest insertion), later stops' ETAs, partner notification, history, activity log.
 - auto_assign_plan / apply_plan: every unassigned order, respecting capacity; applied in one go.
 - advance: the partner's flow assigned -> accepted -> picked_up -> in_transit -> delivered (no skipping).
+- every assignment starts an offer that escalates until the partner answers (see modules/escalation.py).
 
 Everything is scoped to one branch; the branch always comes from the signed-in user.
 """
@@ -17,7 +18,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from modules import store
+from modules import escalation, store
 from modules.data_loader import NOW_MIN, haversine_km, hhmm_to_min, min_to_hhmm
 from modules.places import find_area
 from modules.recommender import DROP_MIN, travel_min
@@ -327,6 +328,7 @@ def assign(actor, delivery_id, dp_id, reason="Assigned", source="manual"):
         _renumber(conn, partner["vehicle_id"])
         if old:
             _renumber(conn, order["vehicle_id"])
+        escalation.offer(conn, delivery_id, dp_id, branch)  # Sent -> Seen -> Ringing -> Calling -> admin alert
         if partner["status"] == "standby":
             conn.execute("UPDATE partners SET status = 'on_duty' WHERE partner_id = ?", (dp_id,))
         due = min_to_hhmm(hhmm_to_min(order["deadline"]))
@@ -367,6 +369,7 @@ def unassign(actor, delivery_id, reason):
             (delivery_id,),
         )
         _renumber(conn, order["vehicle_id"])
+        escalation.clear(conn, delivery_id)
         if old:
             store.add_message(f"{delivery_id} removed from your list.", to_partner=old["partner_id"], branch_id=branch)
         conn.execute("INSERT INTO assignment_history(delivery_id, from_dp, to_dp, by_user, reason, time, branch_id) "
@@ -447,6 +450,8 @@ def advance(dp_id, branch_id, delivery_id, to_status, note=""):
             fields["proof_note"] = str(note).strip()[:200]
         sets = ", ".join(f"{k} = ?" for k in fields)
         conn.execute(f"UPDATE deliveries SET {sets} WHERE delivery_id = ?", (*fields.values(), delivery_id))
+        if to_status == "accepted":
+            escalation.accepted(conn, delivery_id, dp_id, branch_id)
         store.log_event("delivery", f"{row['partner_name']} · {delivery_id} · {STAGE[to_status]}", branch_id=branch_id)
         store._bump(conn)
     return True

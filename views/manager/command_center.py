@@ -26,6 +26,9 @@ with side_col:
                 mui.go("disruptions")
         else:
             ui.empty_state("verified", "No alerts. All routes clear.")
+    ui.section("Likely late", "model_training")
+    with ui.card("likely_late"):
+        mui.likely_late_card(ctx)
     ui.section("Latest", "history")
     with ui.card("latest"):
         mui.activity_feed(ctx, limit=5)

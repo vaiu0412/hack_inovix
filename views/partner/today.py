@@ -3,7 +3,7 @@ from html import escape
 
 import streamlit as st
 
-from modules import escalation, escalation_ui, guards, partner_ui, ui
+from modules import escalation, escalation_ui, guards, partner_ui, predict, ui
 from modules import partner_scope as scope
 
 guards.require_role("partner")
@@ -82,6 +82,9 @@ if len(todo):
         if nxt["note"]:
             tags += " " + ui.pill_html("available", str(nxt["note"]).capitalize())
         tags += " " + partner_ui.stage_pill(nxt["status"])
+        likely = predict.for_branch(branch).get(nxt["delivery_id"])  # only this partner's own stop is shown
+        if likely and likely["p_late"] >= predict.LATE_AT:
+            tags += "<br>" + ui.late_badge(likely)
         st.markdown(f"<p class='dp-sub'>{escape(nxt['address_area'])}</p><div style='margin:8px 0'>{tags}</div>"
                     + ui.kv([("Due", escape(nxt["deadline"])), ("ETA", escape(nxt["planned_eta"])),
                              ("Order", escape(nxt["delivery_id"]))]), unsafe_allow_html=True)

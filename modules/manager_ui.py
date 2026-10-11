@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-from modules import admin, assign, guards, issues, live_map, operations, store, ui
+from modules import admin, assign, guards, issues, live_map, operations, predict, store, ui
 from modules.data_loader import load_all
 from modules.graph_viz import build_graph, render_graph
 from modules.parser import SEVERITIES, llm_status
@@ -108,6 +108,34 @@ def at_risk_rows(ctx, limit=5):
                     f"due {r['deadline']}</small></div><div class='end'>{ui.risk_badge(r['risk_label'])}"
                     f"<br><small>{timing}</small></div></div>")
     return "".join(html)
+
+
+def likely_late_card(ctx, limit=5):
+    """Proactive list from the delay model – before anyone reports a problem – with today's weather switch."""
+    weather = predict.weather_now()
+    pick = st.segmented_control("Weather", list(predict.WEATHER), default=weather, key="weather_pick",
+                                format_func=lambda w: {"clear": "☀️ Clear", "light_rain": "🌦️ Light rain",
+                                                       "heavy_rain": "⛈️ Heavy rain"}[w],
+                                label_visibility="collapsed")
+    if pick and pick != weather:
+        predict.set_weather(ctx["actor"], pick)
+        st.rerun()
+    preds = predict.for_branch(ctx["branch_id"])
+    deliveries = store.deliveries_df(branch_id=ctx["branch_id"]).set_index("delivery_id")
+    drivers = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
+    top = sorted(preds.items(), key=lambda kv: -kv[1]["p_late"])[:limit]
+    late = sum(1 for p in preds.values() if p["p_late"] >= predict.LATE_AT)
+    st.markdown(f"<p class='dp-small' style='margin:4px 0 6px'>{late} of {len(preds)} open stops likely late"
+                f"</p>", unsafe_allow_html=True)
+    rows = []
+    for delivery_id, p in top:
+        d = deliveries.loc[delivery_id]
+        rows.append(f"<div class='dp-row'><div class='main'><b>{escape(delivery_id)} · {escape(d['customer'])}</b>"
+                    f"<small>{drivers.get(d['vehicle_id'], d['vehicle_id'])} · ETA {d['planned_eta']} · due "
+                    f"{d['deadline']} · +{max(p['delay_min'], 0):.0f} min</small><small>{ui.late_badge(p)}</small>"
+                    f"</div></div>")
+    st.markdown("".join(rows) or "<p class='dp-small'>No open stops.</p>", unsafe_allow_html=True)
+    st.caption(f":material/model_training: {predict.summary_line()} · weather is a demo setting")
 
 
 def ai_status_line():

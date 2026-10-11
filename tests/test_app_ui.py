@@ -284,3 +284,16 @@ def test_accepting_the_urgent_card_ends_the_alarm(db):
     row = store.deliveries_df().set_index("delivery_id").loc[order_id]
     assert row["status"] == "accepted" and row["offer_status"] == "accepted"
     assert "NEW URGENT ORDER" not in text_of(continue_session(at))
+
+
+def test_command_center_shows_likely_late_and_switches_weather(db):
+    from modules import predict
+
+    east = auth.get_user("east.admin")
+    page = ok(_page_as(guards.BRANCH_PAGES["command"], east))
+    assert "open stops likely late" in text_of(page) and "Late risk" in text_of(page)
+    page.button_group(key="weather_pick").set_value("heavy_rain").run()
+    assert predict.weather_now() == "heavy_rain"
+    assert "Heavy rain" in text_of(ok(_page_as(guards.BRANCH_PAGES["command"], east)))
+    page = ok(_page_as(guards.BRANCH_PAGES["deliveries"], east))
+    assert "Late risk" in page.dataframe[0].value.columns

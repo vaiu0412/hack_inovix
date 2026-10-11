@@ -160,6 +160,17 @@ def risk_badge(label):
     return pill_html(risk_state(label), label)
 
 
+def late_badge(prediction, reasons=True):
+    """Delay-model badge: 'Predicted late 72%' (red) from 50 %, else 'Late risk 7%', plus the top 2 reasons."""
+    if not prediction:
+        return ""
+    p = prediction["p_late"]
+    pill = (pill_html("critical", f"Predicted late {p:.0%}") if p >= 0.5
+            else pill_html("delayed" if p >= 0.2 else "normal", f"Late risk {p:.0%}"))
+    why = " · ".join(prediction.get("reasons") or [])
+    return pill + (f" <span class='dp-small'>{escape(why)}</span>" if reasons and why else "")
+
+
 def severity_badge(severity):
     """Status pill for a severity."""
     state = {"critical": "critical", "high": "critical", "medium": "delayed"}.get(severity, "normal")

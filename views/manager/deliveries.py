@@ -4,7 +4,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import assign, escalation, escalation_ui, guards, store, ui
+from modules import assign, escalation, escalation_ui, guards, predict, store, ui
 from modules import manager_ui as mui
 
 guards.require_role("branch_admin")
@@ -12,6 +12,8 @@ ui.header("Deliveries")
 ctx = mui.context()
 
 deliveries = store.deliveries_df(branch_id=ctx["branch_id"])
+likely = predict.for_branch(ctx["branch_id"])  # delay model: chance to miss the deadline, per open stop
+late_risk = {i: f"{p['p_late']:.0%}" for i, p in likely.items()}
 risk = mui.risk_labels_now(ctx["open_issues"])
 partner_of = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
 state = deliveries.apply(lambda d: "done" if d["status"] == "delivered" else "unassigned" if d["status"] == "unassigned"
@@ -56,6 +58,7 @@ table = pd.DataFrame({"ID": view["delivery_id"], "Customer": view["customer"], "
                       "Priority": view["priority"].str.capitalize(), "Partner": view["partner"],
                       "Stage": view["status"].map(assign.STAGE).fillna(view["status"]),
                       "Offer": view["offer_status"].map(escalation_ui.offer_text),
+                      "Late risk": view["delivery_id"].map(late_risk).fillna("—"),
                       "ETA": view["planned_eta"].fillna("—"), "Due": view["deadline"],
                       "Status": view["state"].map(ui.status_text), "Change": view["note"].fillna("").str.capitalize()})
 table_col, panel_col = st.columns([2.2, 1], gap="medium")
@@ -80,6 +83,9 @@ with panel_col, ui.card("delivery_panel"):
                            ("Change", escape(str(d["note"] or "—").capitalize()))]), unsafe_allow_html=True)
         if d["offer_status"]:
             st.markdown(f"<div style='margin:0 0 8px'>{escalation_ui.offer_pill(d['offer_status'])}</div>",
+                        unsafe_allow_html=True)
+        if d["delivery_id"] in likely:
+            st.markdown(f"<div style='margin:0 0 8px'>{ui.late_badge(likely[d['delivery_id']])}</div>",
                         unsafe_allow_html=True)
         st.link_button("Call customer", f"tel:{d['customer_phone']}", icon=":material/call:", width="stretch")
         mui.reassign_controls(ctx, d.to_dict())

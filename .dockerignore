@@ -1,0 +1,18 @@
+# keep the image small and secret-free
+.git
+.github
+.claude
+.venv
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.env
+.streamlit/secrets.toml
+data/*.db
+data/*.db-*
+data/backups
+data/voice
+docs
+tests
+hack_inovix
+~$*

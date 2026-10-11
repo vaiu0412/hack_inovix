@@ -4,9 +4,10 @@ Every operational row (partners, vehicles, deliveries, issues, disruptions, mess
 a branch_id, and every read/write function here takes a branch_id to scope by (None = all branches,
 used only by internal jobs and the Super Admin summaries).
 
-Persistence: one file at a fixed absolute path, <project>/data/deport.db (set DEPORT_DB or RIPPLE_DB to use
-another file – the tests use a temporary one). Demo data is seeded ONLY when the database is empty; it is never
-reset automatically. "Reset demo" (Super Admin, with confirm) first saves a timestamped copy in data/backups/.
+Persistence: one file at a fixed absolute path, <project>/data/deport.db (set DB_PATH – or the older DEPORT_DB /
+RIPPLE_DB – to use another file; Docker uses /data/deport.db, the tests a temporary one). Demo data is seeded ONLY
+when the database is empty; it is never reset automatically. "Reset demo" (Super Admin, with confirm) first saves a
+timestamped copy in data/backups/.
 Signing out only revokes the session. Every write goes through one connection helper that commits or rolls back.
 """
 import json
@@ -122,7 +123,8 @@ OLD_DB = DATA_DIR / "ripple.db"  # name used before the DEPORT rebrand – adopt
 
 
 def db_path():
-    custom = os.getenv("DEPORT_DB") or os.getenv("RIPPLE_DB")
+    """The database file: DB_PATH (Docker/hosting), else DEPORT_DB / RIPPLE_DB (older names), else data/deport.db."""
+    custom = os.getenv("DB_PATH") or os.getenv("DEPORT_DB") or os.getenv("RIPPLE_DB")
     if custom:
         return Path(custom)
     if not DEFAULT_DB.exists() and OLD_DB.exists():

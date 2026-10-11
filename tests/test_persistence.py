@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from modules import admin, auth, partner_scope as scope, store
+from modules import admin, auth, store
+from modules import partner_scope as scope
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -110,6 +111,15 @@ def test_default_database_is_an_absolute_project_path(monkeypatch):
     monkeypatch.delenv("RIPPLE_DB", raising=False)
     monkeypatch.delenv("DEPORT_DB", raising=False)
     assert store.DEFAULT_DB.is_absolute() and store.DEFAULT_DB == ROOT / "data" / "deport.db"
+
+
+def test_db_path_setting_moves_the_database_and_its_files(tmp_path, monkeypatch):
+    """Docker / Render / Railway set DB_PATH to a file on a persistent disk."""
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "disk" / "deport.db"))
+    store.init_db()
+    assert store.db_path() == tmp_path / "disk" / "deport.db" and store.db_path().exists()
+    assert store.files_dir("voice") == tmp_path / "disk" / "voice"
+    assert auth.authenticate("DP102", "Partner@123")[0]["dp_id"] == "DP102"
 
 
 def test_prototype_database_is_backed_up_and_gets_accounts(db):

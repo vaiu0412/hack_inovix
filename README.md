@@ -56,6 +56,9 @@ flowchart LR
 - **Voice or text reports** with AI understanding (LLM when a key is set, offline Tamil/English rules otherwise).
 - **Impact → risk → plan:** cascade over each route, a 0–100 risk score, recommended actions with reasons.
 - **Live map** on real road shapes, alerts in 3 steps, KPIs, history, partner phone screens.
+- **Delay prediction (LightGBM):** minutes late and chance to miss the deadline for every open stop, with reasons
+  (*Heavy rain · Avinashi Rd traffic*) – a proactive *Likely late* list, rain-aware impact, smarter assignment
+  ([`docs/ML.md`](docs/ML.md)). MAE 3.85 min, ROC-AUC 0.965 on a date-split test set (synthetic history).
 - **Assign Work:** new orders (form or CSV), best partner with a reason, step-by-step delivery flow.
 - **No missed orders:** every assignment is an offer – Sent → Seen → Ringing (alarm) → AI voice call (Twilio, or a
   simulated call in Demo mode) → red admin alert with the next-best partner and one-click Reassign
@@ -69,6 +72,7 @@ flowchart LR
 | UI | Streamlit 1.53 (multi-page, dark glass CSS) |
 | Backend | Python 3.12+, FastAPI + Uvicorn |
 | AI / NLP | Groq or Gemini (optional), rule-based Tamil/English parser, SpeechRecognition, RapidFuzz |
+| ML | LightGBM (training only) → exported trees scored in pure Python; synthetic 60-day history |
 | Data | SQLite (WAL), pandas |
 | Maps & charts | Folium, OSRM shapes (cached), Esri tiles, Plotly, NetworkX |
 | Quality & ops | pytest, ruff, GitHub Actions, Docker |
@@ -106,26 +110,29 @@ For judges and this README only – never shown in the app.
 4. **Alerts** → what changed → what's affected → what to do → **Accept plan** → *Plan applied* (missed 3 → 0).
 5. **Phone:** DP102 sees **Route changed**; DP106 has the KMCH insulin pickup.
 6. *Bonus:* **Assign Work** → new order → **Assign best** → partner taps *Accept → Picked up → Start → Delivered*.
-7. *Escalation:* assign a **medical** order to DP102 and don't answer: full-screen card → alarm at 1 min → call
+7. *Delay model:* Command Center → **Likely late** → switch the weather to *Heavy rain*: risks and reasons update; an
+   accident reported in the rain shows more delay than on a dry day.
+8. *Escalation:* assign a **medical** order to DP102 and don't answer: full-screen card → alarm at 1 min → call
    (simulated without Twilio keys) at 3 min → red alert with **Reassign to …** at 5 min (times: Super Admin → Overview).
 
 ## Project structure
 ```
 app.py         sign-in first, then role-based navigation
 views/         pages: manager/ · partner/ · super/ · login · console
-modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, escalation,
+modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, escalation, predict,
                geometry, places) + UI helpers (ui, manager_ui, partner_ui, report_ui, login_ui, escalation_ui,
                live_map, graph_viz)
 services/      optional outside providers with a Demo-mode fallback (voice_call: Twilio)
+ml/            synthetic history generator + LightGBM training      models/   exported delay models (JSON)
 api/           FastAPI REST for a native app + Twilio webhooks + the offer timer
 data/          demo data with real Coimbatore coordinates + cached road shapes
-tests/         168 tests (flows, RBAC, persistence, assignment, escalation, API, headless UI)
+tests/         177 tests (flows, RBAC, persistence, assignment, escalation, delay model, API, headless UI)
 ```
 
 ## Roadmap
 - [x] Portfolio-ready: lint, docstrings, Docker, CI, deploy guide
 - [x] Order accept + escalation (sound → AI voice call → reassign)
-- [ ] Delay prediction model (proactive "likely late")
+- [x] Delay prediction model (proactive "likely late")
 - [ ] OR-Tools re-optimisation alongside the rule-based plan
 - [ ] Learning from admin decisions
 - [ ] Real-world data: live GPS, weather, traffic

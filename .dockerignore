@@ -13,6 +13,7 @@ data/*.db-*
 data/backups
 data/voice
 docs
+ml/data
 tests
 hack_inovix
 ~$*

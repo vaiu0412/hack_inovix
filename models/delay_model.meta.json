@@ -1,0 +1,96 @@
+{
+  "trained_on": "2026-10-11",
+  "lightgbm": "4.7.0",
+  "data": {
+    "file": "ml/data/history.csv",
+    "rows": 24639,
+    "days": 60,
+    "train_rows": 16911,
+    "valid_rows": 2882,
+    "test_rows": 4846,
+    "test_from": "2026-09-18",
+    "test_to": "2026-09-29"
+  },
+  "params": {
+    "num_leaves": 15,
+    "learning_rate": 0.05,
+    "min_data_in_leaf": 40,
+    "feature_fraction": 0.9,
+    "bagging_fraction": 0.9,
+    "bagging_freq": 1,
+    "lambda_l2": 1.0,
+    "seed": 7,
+    "verbose": -1,
+    "deterministic": true,
+    "force_row_wise": true,
+    "num_threads": 1
+  },
+  "trees": {
+    "regressor": 204,
+    "classifier": 155
+  },
+  "metrics": {
+    "mae_min": 3.85,
+    "rmse_min": 7.11,
+    "mae_rules_min": 4.75,
+    "mae_plan_min": 8.12,
+    "roc_auc": 0.965,
+    "roc_auc_rules": 0.957,
+    "late_rate_test": 0.189,
+    "accuracy_at_0_5": 0.933
+  },
+  "export_max_abs_diff": {
+    "regressor": 8.588061710668171e-07,
+    "classifier": 5.949438620644898e-07
+  },
+  "importance_gain": {
+    "regressor": {
+      "hour": 0.284,
+      "stops": 0.272,
+      "distance": 0.171,
+      "road": 0.095,
+      "vehicle": 0.053,
+      "day": 0.046,
+      "rain": 0.039,
+      "category": 0.029,
+      "experience": 0.011
+    },
+    "classifier": {
+      "slack": 0.662,
+      "hour": 0.097,
+      "stops": 0.094,
+      "distance": 0.055,
+      "road": 0.028,
+      "vehicle": 0.018,
+      "day": 0.018,
+      "category": 0.014,
+      "rain": 0.011,
+      "experience": 0.004
+    }
+  },
+  "mean_abs_shap": {
+    "regressor": {
+      "stops": 0.226,
+      "hour": 0.209,
+      "road": 0.147,
+      "vehicle": 0.109,
+      "distance": 0.102,
+      "category": 0.095,
+      "day": 0.057,
+      "experience": 0.028,
+      "rain": 0.026
+    },
+    "classifier": {
+      "slack": 0.489,
+      "stops": 0.118,
+      "hour": 0.107,
+      "road": 0.07,
+      "distance": 0.068,
+      "vehicle": 0.05,
+      "category": 0.043,
+      "day": 0.03,
+      "rain": 0.013,
+      "experience": 0.012
+    }
+  }
+}

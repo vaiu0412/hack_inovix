@@ -4,7 +4,8 @@
 - candidates / best_match: rank the branch's partners for one order, with a short reason
   ("Arun · 1.2 km away · 3/8 load · 🚐 fits"). Scored by distance from the partner's position or
   stops (haversine), load vs. capacity, vehicle fits the package, partner status (never critical,
-  on break or off), same-route bonus and whether the deadline can still be met.
+  on break or off), same-route bonus and whether the deadline can still be met – using the delay model's
+  predicted extra minutes for that partner, road, hour and weather (modules/predict.py).
 - assign / reassign / unassign: ONE transaction each – vehicle, status, ETA and stop order
   (cheapest insertion), later stops' ETAs, partner notification, history, activity log.
 - auto_assign_plan / apply_plan: every unassigned order, respecting capacity; applied in one go.
@@ -14,11 +15,11 @@
 Everything is scoped to one branch; the branch always comes from the signed-in user.
 """
 import re
-from datetime import datetime
+from datetime import date, datetime
 
 import pandas as pd
 
-from modules import escalation, store
+from modules import escalation, predict, store
 from modules.data_loader import NOW_MIN, haversine_km, hhmm_to_min, min_to_hhmm
 from modules.places import find_area
 from modules.recommender import DROP_MIN, travel_min
@@ -210,6 +211,8 @@ def candidates(order, branch, extra_load=None, partners=None, deliveries=None):
     critical, vehicles_hit = _critical_partners(branch)
     point = (float(order["lat"]), float(order["lng"]))
     deadline = hhmm_to_min(order["deadline"])
+    rain, weekday = predict.WEATHER[predict.weather_now()], date.today().weekday()
+    category = order.get("category") or predict.CATEGORY_OF_PRIORITY.get(order.get("priority"), "Parcel")
     out = []
     for p in partners.to_dict("records"):
         kind = p["vehicle_type"]
@@ -230,14 +233,23 @@ def candidates(order, branch, extra_load=None, partners=None, deliveries=None):
         index, eta, added, _ = _insertion((p["lat"], p["lng"]), stops, point)
         near_km = min([haversine_km(p["lat"], p["lng"], *point)] + [haversine_km(s[0], s[1], *point) for s in stops])
         same_route = order.get("road_id") in str(p.get("route_roads") or "").split("|")
-        feasible = eta <= deadline
-        score = near_km + 2.5 * load / limit - (1.5 if same_route else 0) + (0 if feasible else 50)
+        before = (p["lat"], p["lng"]) if index == 0 else stops[index - 1][:2]
+        likely = predict.predict_delay({
+            "road_id": order.get("road_id"), "hour": eta / 60, "weekday": weekday, "rain_mm": rain,
+            "distance_km": haversine_km(*before, *point), "stops_before": index, "vehicle_type": kind,
+            "category": category if category in predict.CATEGORIES else "Parcel",
+            "experience_months": float(p.get("experience_months") or 0), "slack_min": deadline - eta})
+        extra = max(0.0, likely["delay_min"])  # minutes the model expects on top of the planned ETA
+        feasible = eta + extra <= deadline
+        score = near_km + 2.5 * load / limit - (1.5 if same_route else 0) + 0.1 * extra + (0 if feasible else 50)
         reason = (f"{p['name']} · {near_km:.1f} km away · {load}/{limit} load · {VEHICLE_EMOJI.get(kind, '')} fits"
-                  + (" · same route" if same_route else "") + ("" if feasible else " · late"))
+                  + (" · same route" if same_route else "") + (f" · +{extra:.0f} min likely" if extra >= 3 else "")
+                  + ("" if feasible else " · late"))
         out.append({"partner_id": p["partner_id"], "name": p["name"], "vehicle_id": p["vehicle_id"],
                     "vehicle_type": kind, "distance_km": round(near_km, 2), "load": load, "limit": limit,
                     "same_route": same_route, "feasible": feasible, "eta_min": int(round(eta)), "position": index,
-                    "added_min": int(round(added)), "score": round(score, 3), "reason": reason})
+                    "added_min": int(round(added)), "score": round(score, 3), "reason": reason,
+                    "likely_delay_min": round(extra, 1), "p_late": likely["p_late"]})
     return sorted(out, key=lambda c: c["score"])
 
 

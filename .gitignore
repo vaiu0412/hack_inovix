@@ -15,3 +15,4 @@ data/voice/
 ~$*
 docs/presentation/assets/
 .ruff_cache/
+ml/data/

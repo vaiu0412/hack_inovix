@@ -156,7 +156,8 @@ def add_partner(actor, name, phone, email, vehicle_id, route_roads, shift_start=
         if email and conn.execute("SELECT 1 FROM users WHERE lower(email) = ?", (email,)).fetchone():
             raise ValueError("An account with this email already exists")
         dp_id = _next_dp_id(conn)
-        conn.execute("INSERT INTO partners VALUES (?,?,?,?,?,?,?,?,?,?)",
+        conn.execute("INSERT INTO partners(partner_id, name, phone, vehicle_id, shift_start, shift_end, languages, "
+                     "rating, status, branch_id, experience_months) VALUES (?,?,?,?,?,?,?,?,?,?,0)",
                      (dp_id, name.strip(), phone.strip(), vehicle_id, shift_start, shift_end, "Tamil|English", 5.0,
                       "on_duty", branch_id))
         conn.execute("UPDATE vehicles SET status = 'active', route_roads = ? WHERE vehicle_id = ? AND branch_id = ?",

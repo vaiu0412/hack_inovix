@@ -24,7 +24,7 @@ from modules import geometry
 from modules.data_loader import DATA_DIR, hhmm_to_min, load_all, load_branches, load_partners, nearest_place
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 ORDER_COLUMNS = {  # work assignment (v6): who created / assigned / handled an order, and when
     "created_by": "TEXT", "created_at": "TEXT", "assigned_at": "TEXT", "assigned_by": "TEXT", "accepted_at": "TEXT",
     "picked_at": "TEXT", "delivered_at": "TEXT", "package_size": "TEXT DEFAULT 'small'", "category": "TEXT",
@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS permissions (perm_id INTEGER PRIMARY KEY AUTOINCREMEN
 CREATE TABLE IF NOT EXISTS role_permissions (role_id TEXT, perm_id INTEGER, PRIMARY KEY (role_id, perm_id));
 CREATE TABLE IF NOT EXISTS partners (
     partner_id TEXT PRIMARY KEY, name TEXT, phone TEXT, vehicle_id TEXT, shift_start TEXT,
-    shift_end TEXT, languages TEXT, rating REAL, status TEXT, branch_id TEXT);
+    shift_end TEXT, languages TEXT, rating REAL, status TEXT, branch_id TEXT, experience_months INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS vehicles (
     vehicle_id TEXT PRIMARY KEY, reg_no TEXT, type TEXT, status TEXT, current_lat REAL,
     current_lng REAL, route_roads TEXT, capacity INTEGER, branch_id TEXT);
@@ -264,6 +264,8 @@ def init_db():
             _migrate_v6(conn)
         if current < 7:
             _migrate_v7(conn)
+        if current < 8:
+            _migrate_v8(conn)
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:  # data but no accounts: add the demo ones
             _seed_users(conn)
             conn.execute("INSERT INTO audit_log(time, actor_user_id, action, target, details_json) VALUES (?,?,?,?,?)",
@@ -411,6 +413,16 @@ def _migrate_v7(conn):
     _set_version(conn, 7)
 
 
+def _migrate_v8(conn):
+    """Partner experience in months (a feature of the delay model); the demo partners get their CSV values."""
+    if "experience_months" not in _columns(conn, "partners"):
+        conn.execute("ALTER TABLE partners ADD COLUMN experience_months INTEGER DEFAULT 0")
+    for p in load_partners().itertuples():
+        conn.execute("UPDATE partners SET experience_months = ? WHERE partner_id = ?",
+                     (int(p.experience_months), p.partner_id))
+    _set_version(conn, 8)
+
+
 def _set_version(conn, version):
     conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE "
                  "SET value = excluded.value", (str(version),))
@@ -445,9 +457,10 @@ def reset_demo(backup=True):
             conn.execute(f"DROP TABLE IF EXISTS {table}")
         conn.executescript(SCHEMA)
         _seed_reference(conn)
-        conn.executemany("INSERT INTO partners VALUES (?,?,?,?,?,?,?,?,?,?)",
-                         partners[["partner_id", "name", "phone", "vehicle_id", "shift_start", "shift_end",
-                                   "languages", "rating", "status", "branch_id"]].values.tolist())
+        columns = ["partner_id", "name", "phone", "vehicle_id", "shift_start", "shift_end", "languages", "rating",
+                   "status", "branch_id", "experience_months"]
+        conn.executemany(f"INSERT INTO partners({', '.join(columns)}) VALUES ({','.join('?' * len(columns))})",
+                         partners[columns].values.tolist())
         vehicles = data["vehicles"]
         conn.executemany("INSERT INTO vehicles VALUES (?,?,?,?,?,?,?,?,?)", [
             (v.vehicle_id, v.reg_no, v.type, v.status, v.current_lat, v.current_lng,
@@ -515,7 +528,7 @@ def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
 
 def vehicles_df(branch_id=None):
     """Vehicles with their driver, optionally for one branch."""
-    df = _df("SELECT v.*, p.name AS driver, p.partner_id FROM vehicles v "
+    df = _df("SELECT v.*, p.name AS driver, p.partner_id, p.experience_months FROM vehicles v "
              "LEFT JOIN partners p ON p.vehicle_id = v.vehicle_id"
              + (" WHERE v.branch_id = ?" if branch_id else "") + " ORDER BY v.vehicle_id",
              (branch_id,) if branch_id else ())
@@ -582,11 +595,13 @@ def partners_df(branch_id=None):
                 "languages": (p.languages or "").replace("|", ", "),
                 "rating": p.rating,
                 "route_roads": p.route_roads or "",
+                "experience_months": int(p.experience_months or 0),
             }
         )
     columns = ["partner_id", "name", "phone", "email", "status", "account_active", "branch_id", "vehicle_id", "reg_no",
                "vehicle_type", "area", "lat", "lng", "assigned", "delivered", "pending", "urgent", "next_stop",
-               "next_eta", "next_road", "open_issues", "shift", "languages", "rating", "route_roads"]
+               "next_eta", "next_road", "open_issues", "shift", "languages", "rating", "route_roads",
+               "experience_months"]
     return pd.DataFrame(rows, columns=columns)
 
 

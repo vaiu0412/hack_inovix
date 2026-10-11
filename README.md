@@ -59,6 +59,9 @@ flowchart LR
 - **Delay prediction (LightGBM):** minutes late and chance to miss the deadline for every open stop, with reasons
   (*Heavy rain · Avinashi Rd traffic*) – a proactive *Likely late* list, rain-aware impact, smarter assignment
   ([`docs/ML.md`](docs/ML.md)). MAE 3.85 min, ROC-AUC 0.965 on a date-split test set (synthetic history).
+- **Optimised plan (OR-Tools):** next to the rule-based plan, a vehicle-routing re-optimisation of the affected
+  branch (time windows, capacities, medical first) with a side-by-side *missed · delay · km* comparison – the admin
+  picks which one to apply ([`docs/OPTIMIZER.md`](docs/OPTIMIZER.md)).
 - **Assign Work:** new orders (form or CSV), best partner with a reason, step-by-step delivery flow.
 - **No missed orders:** every assignment is an offer – Sent → Seen → Ringing (alarm) → AI voice call (Twilio, or a
   simulated call in Demo mode) → red admin alert with the next-best partner and one-click Reassign
@@ -73,6 +76,7 @@ flowchart LR
 | Backend | Python 3.12+, FastAPI + Uvicorn |
 | AI / NLP | Groq or Gemini (optional), rule-based Tamil/English parser, SpeechRecognition, RapidFuzz |
 | ML | LightGBM (training only) → exported trees scored in pure Python; synthetic 60-day history |
+| Optimisation | Google OR-Tools (VRP with time windows + capacities) |
 | Data | SQLite (WAL), pandas |
 | Maps & charts | Folium, OSRM shapes (cached), Esri tiles, Plotly, NetworkX |
 | Quality & ops | pytest, ruff, GitHub Actions, Docker |
@@ -108,6 +112,7 @@ For judges and this README only – never shown in the app.
 2. **Laptop:** `east.admin@deport.in` → red banner *DP102 · Accident · Avinashi Rd · 9 deliveries hit*.
 3. **Live Map** → DP102 pulses red on Avinashi Road; green alternate route.
 4. **Alerts** → what changed → what's affected → what to do → **Accept plan** → *Plan applied* (missed 3 → 0).
+   *Optional:* switch to **Optimised (OR-Tools)** – also 0 missed, less delay, fewer km – and apply that instead.
 5. **Phone:** DP102 sees **Route changed**; DP106 has the KMCH insulin pickup.
 6. *Bonus:* **Assign Work** → new order → **Assign best** → partner taps *Accept → Picked up → Start → Delivered*.
 7. *Delay model:* Command Center → **Likely late** → switch the weather to *Heavy rain*: risks and reasons update; an
@@ -119,21 +124,21 @@ For judges and this README only – never shown in the app.
 ```
 app.py         sign-in first, then role-based navigation
 views/         pages: manager/ · partner/ · super/ · login · console
-modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, escalation, predict,
+modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, escalation, predict, optimizer,
                geometry, places) + UI helpers (ui, manager_ui, partner_ui, report_ui, login_ui, escalation_ui,
                live_map, graph_viz)
 services/      optional outside providers with a Demo-mode fallback (voice_call: Twilio)
 ml/            synthetic history generator + LightGBM training      models/   exported delay models (JSON)
 api/           FastAPI REST for a native app + Twilio webhooks + the offer timer
 data/          demo data with real Coimbatore coordinates + cached road shapes
-tests/         177 tests (flows, RBAC, persistence, assignment, escalation, delay model, API, headless UI)
+tests/         187 tests (flows, RBAC, persistence, assignment, escalation, delay model, optimiser, API, UI)
 ```
 
 ## Roadmap
 - [x] Portfolio-ready: lint, docstrings, Docker, CI, deploy guide
 - [x] Order accept + escalation (sound → AI voice call → reassign)
 - [x] Delay prediction model (proactive "likely late")
-- [ ] OR-Tools re-optimisation alongside the rule-based plan
+- [x] OR-Tools re-optimisation alongside the rule-based plan
 - [ ] Learning from admin decisions
 - [ ] Real-world data: live GPS, weather, traffic
 - [ ] Photo reports, customer tracking link, proof of delivery, analytics, Tamil UI

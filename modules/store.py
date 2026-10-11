@@ -766,16 +766,19 @@ def clear_draft(user_id, form):
 
 
 def get_setting(key, default=None):
-    """One app setting (escalation times …) as text, or the default."""
-    with connect() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-    return row["value"] if row else default
+    """One app setting (escalation times, weather …) as text, or the default."""
+    return all_settings().get(key, default)
 
 
 def all_settings():
-    """Every saved app setting as {key: text}."""
-    with connect() as conn:
-        return {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
+    """Every saved app setting as {key: text}; {} before the database exists (never creates it)."""
+    if getattr(_tx, "conn", None) is None and not db_path().exists():
+        return {}
+    try:
+        with connect() as conn:
+            return {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
+    except sqlite3.OperationalError:  # an old database before the settings table
+        return {}
 
 
 def set_setting(key, value, updated_by="system"):

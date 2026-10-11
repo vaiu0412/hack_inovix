@@ -141,3 +141,10 @@ def test_data_without_accounts_gets_demo_accounts_and_keeps_data(db):
     assert auth.authenticate("east.admin@deport.in", "Admin@123")[0]["branch_id"] == "CBE-E"
     assert store.deliveries_df().set_index("delivery_id").loc["D01", "status"] == "delivered"   # data kept
     assert resets() == 1
+
+
+def test_settings_read_before_the_database_exists_creates_nothing(tmp_path, monkeypatch):
+    """Reading a setting (e.g. the weather for the impact engine) must not need – or create – a database."""
+    monkeypatch.setenv("RIPPLE_DB", str(tmp_path / "missing" / "deport.db"))
+    assert store.get_setting("weather_now", "clear") == "clear" and store.all_settings() == {}
+    assert not (tmp_path / "missing" / "deport.db").exists()

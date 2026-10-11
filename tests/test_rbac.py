@@ -4,7 +4,8 @@ import time
 
 import pytest
 
-from modules import admin, auth, operations, partner_scope as scope, store
+from modules import admin, auth, operations, store
+from modules import partner_scope as scope
 
 DEMO_PASSWORDS = ["Super@123", "Admin@123", "Partner@123"]
 
@@ -117,8 +118,14 @@ def test_otp_expires_and_limits_attempts(db, monkeypatch):
 def test_forgot_password(db):
     code, _, ok = auth.request_otp("east.admin@deport.in", "reset")
     assert ok
-    assert auth.reset_password_with_otp("east.admin@deport.in", code, "short") == (False, auth.MESSAGES["weak_password"])
-    assert auth.reset_password_with_otp("east.admin@deport.in", code, "NewPass2026") == (True, auth.MESSAGES["reset_ok"])
+    assert auth.reset_password_with_otp("east.admin@deport.in", code, "short") == (
+        False,
+        auth.MESSAGES["weak_password"],
+    )
+    assert auth.reset_password_with_otp("east.admin@deport.in", code, "NewPass2026") == (
+        True,
+        auth.MESSAGES["reset_ok"],
+    )
     assert login("east.admin@deport.in", "Admin@123")[0] is None
     assert login("east.admin@deport.in", "NewPass2026")[0]["user_id"] == "east.admin"
     assert auth.reset_password_with_otp("east.admin@deport.in", code, "Again2026x")[0] is False  # code used

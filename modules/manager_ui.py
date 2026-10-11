@@ -29,10 +29,12 @@ def context():
 
 
 def go(page_key):
+    """Open another Branch Admin page by its key."""
     st.switch_page(guards.BRANCH_PAGES[page_key])
 
 
 def short_road(name):
+    """Shorter road name for tight spaces ('Avinashi Road' -> 'Avinashi Rd')."""
     return str(name or "").replace(" Road", " Rd").replace(" Stretch", "")
 
 
@@ -90,6 +92,7 @@ def alert_banner(ctx):
 
 
 def at_risk_rows(ctx, limit=5):
+    """The most urgent at-risk deliveries for the 'At risk now' list."""
     rows = []
     drivers = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
     order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
@@ -108,6 +111,7 @@ def at_risk_rows(ctx, limit=5):
 
 
 def ai_status_line():
+    """One caption saying which AI engine is active, or rules mode without a key."""
     ai = llm_status()
     if not ai["available"]:
         st.caption(":material/smart_toy: AI: rules mode (no key).")
@@ -190,7 +194,7 @@ def live_map_view(ctx, height=620, key="live_map", filters=True):
     holder.markdown(ui.skeleton(height), unsafe_allow_html=True)
     fmap = live_map.build(view, deliveries, ctx["roads"], disruptions, detours, risk,
                           selected=st.session_state.get("selected_partner"), states=states,
-                          focus=True if focus else None, dark=ui.is_dark())
+                          focus=True if focus else None)
     with holder.container():
         out = st_folium(fmap, height=height, use_container_width=True, key=key,
                         returned_objects=["last_object_clicked_tooltip"])
@@ -205,6 +209,7 @@ def live_map_view(ctx, height=620, key="live_map", filters=True):
 
 
 def partner_picker(ctx):
+    """Select box to focus the map and side panel on one partner."""
     partners = ctx["partners"]
     selected = st.session_state.get("selected_partner")
     options = partners["partner_id"].tolist()
@@ -279,6 +284,7 @@ def partner_panel(ctx, pid):
 
 
 def add_basemap(m):
+    """Add the default basemap (no layer switcher) to a small map."""
     return live_map.add_tiles(m, switcher=False)
 
 
@@ -292,8 +298,11 @@ def order_card(ctx, order, found):
                     unsafe_allow_html=True)
         best = found[0] if found else None
         if best:
-            st.markdown(f"<div style='margin:6px 0 10px'>{ui.pill_html('normal' if best['feasible'] else 'delayed', 'Best')}"
-                        f" <span class='dp-small'>{escape(best['reason'])}</span></div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='margin:6px 0 10px'>{ui.pill_html('normal' if best['feasible'] else 'delayed', 'Best')}"
+                f" <span class='dp-small'>{escape(best['reason'])}</span></div>",
+                unsafe_allow_html=True,
+            )
         else:
             st.markdown("<p class='dp-small'>No partner fits right now.</p>", unsafe_allow_html=True)
         go_col, pick_col = st.columns(2)
@@ -307,6 +316,7 @@ def order_card(ctx, order, found):
 
 
 def choose_partner_form(ctx, order, found, verb="Assign"):
+    """Form to pick a partner by hand for an order, with each option's reason."""
     options = [c for c in found if c["vehicle_id"] != order.get("vehicle_id")]
     if not options:
         st.caption("No other partner fits.")
@@ -354,8 +364,14 @@ def team_table(ctx):
     with st.container(horizontal=True, vertical_alignment="center", gap="small"):
         query = st.text_input("Search", placeholder="Search name, ID, area", label_visibility="collapsed",
                               icon=":material/search:", width=260)
-        status_pick = st.pills("Status", ["normal", "delayed", "critical", "available", "break"], selection_mode="multi",
-                               format_func=ui.status_text, label_visibility="collapsed", key="team_status")
+        status_pick = st.pills(
+            "Status",
+            ["normal", "delayed", "critical", "available", "break"],
+            selection_mode="multi",
+            format_func=ui.status_text,
+            label_visibility="collapsed",
+            key="team_status",
+        )
         kind_pick = st.pills("Vehicle", sorted(partners["vehicle_type"].unique()), selection_mode="multi",
                              format_func=lambda k: f"{ui.VEHICLE_EMOJI.get(k, '')} {k.title()}",
                              label_visibility="collapsed", key="team_kind")
@@ -392,8 +408,12 @@ def team_table(ctx):
 # ---------------------------------------------------------------- alerts
 @st.dialog("Log issue", width="large")
 def log_issue_dialog(ctx):
-    reporter = st.selectbox("For", ["OPS"] + ctx["partners"]["partner_id"].tolist(),
-                            format_func=lambda pid: "Ops desk" if pid == "OPS" else f"{pid} · {ctx['partner_names'][pid]}")
+    """Dialog for an admin to log an issue for a partner or the operations desk."""
+    reporter = st.selectbox(
+        "For",
+        ["OPS"] + ctx["partners"]["partner_id"].tolist(),
+        format_func=lambda pid: "Ops desk" if pid == "OPS" else f"{pid} · {ctx['partner_names'][pid]}",
+    )
     issue_id = report_form(reporter, ctx["branch_id"], prefix=f"mgr_{reporter}", source="manager")
     if issue_id:
         st.rerun()
@@ -500,7 +520,7 @@ def alert_steps(ctx, issue):
             small = live_map.build(ctx["partners"], store.deliveries_df(branch_id=ctx["branch_id"]), ctx["roads"],
                                    [plan["disruption"]], plan.get("via_roads", []),
                                    dict(zip(risk["delivery_id"], risk["risk_label"])), states=ctx["states"],
-                                   focus=True, dark=ui.is_dark())
+                                   focus=True)
             st_folium(small, height=380, use_container_width=True, key=f"issue_map_{issue['issue_id']}",
                       returned_objects=[])
         with st.expander(f"Deliveries at risk ({len(risk)})", icon=":material/list:"):
@@ -535,7 +555,9 @@ def alert_steps(ctx, issue):
                     st.code(message["text"], language=None, wrap_lines=True)
     if issue["status"] == "analysed":
         with st.container(horizontal=True, gap="small"):
-            if st.button("Accept plan", type="primary", key=f"accept_{issue['issue_id']}", icon=":material/check_circle:"):
+            if st.button(
+                "Accept plan", type="primary", key=f"accept_{issue['issue_id']}", icon=":material/check_circle:"
+            ):
                 operations.accept(issue["issue_id"], decided_by=st.session_state.get("display_name", "Branch admin"),
                                   branch_id=ctx["branch_id"])
                 st.session_state["last_applied"] = issue["issue_id"]
@@ -554,9 +576,13 @@ def alert_steps(ctx, issue):
 
 # ---------------------------------------------------------------- history
 def activity_feed(ctx, limit=60):
+    """Latest issues, AI results, decisions and deliveries as a timeline."""
     icons = {"issue": "report", "ai": "psychology", "decision": "gavel", "delivery": "package_2", "edit": "edit",
              "system": "settings"}
-    rows = [f"<div class='dp-row'><span class='dp-ico' style='color:var(--dp-muted)'>{icons.get(e['kind'], 'info')}"
-            f"</span><div class='main'>{escape(e['text'])}</div><div class='end dp-small'>{escape(e['created_at'])}</div>"
-            f"</div>" for e in store.events(limit, branch_id=ctx["branch_id"]).to_dict("records")]
+    rows = [
+        f"<div class='dp-row'><span class='dp-ico' style='color:var(--dp-muted)'>{icons.get(e['kind'], 'info')}"
+        f"</span><div class='main'>{escape(e['text'])}</div><div class='end dp-small'>{escape(e['created_at'])}</div>"
+        f"</div>"
+        for e in store.events(limit, branch_id=ctx["branch_id"]).to_dict("records")
+    ]
     st.markdown("".join(rows) or "<p class='dp-sub'>No activity yet.</p>", unsafe_allow_html=True)

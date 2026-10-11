@@ -2,8 +2,7 @@
 import re
 
 import pytest
-from streamlit.testing.v1 import AppTest
-from streamlit.testing.v1 import element_tree
+from streamlit.testing.v1 import AppTest, element_tree
 
 from modules import auth, guards, store
 

@@ -1,0 +1,19 @@
+line-length = 120
+target-version = "py312"
+extend-exclude = ["hack_inovix"]   # an old local copy of the repo, not part of the project
+
+[lint]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade, docstrings
+select = ["E", "W", "F", "I", "B", "UP", "D100", "D101", "D102", "D103"]
+ignore = ["B905"]   # zip() over columns of the same table; strict= adds noise, not safety
+
+[lint.flake8-bugbear]
+# FastAPI declares dependencies and uploads as default arguments
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Header", "fastapi.Query"]
+
+[lint.per-file-ignores]
+# docstrings are required in the engine (modules/) and the API; pages and tests read top to bottom
+"!{modules,api}/**" = ["D"]
+
+[lint.isort]
+known-first-party = ["modules", "api"]

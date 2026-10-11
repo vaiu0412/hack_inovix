@@ -21,6 +21,7 @@ TYPE_LABELS = {**QUICK_TYPES, "protest": "Protest", "requirement_change": "Chang
 
 
 def type_label(dtype):
+    """Readable name of a disruption type, e.g. 'road_block' -> 'Road blocked'."""
     return TYPE_LABELS.get(dtype, str(dtype).replace("_", " ").capitalize())
 
 

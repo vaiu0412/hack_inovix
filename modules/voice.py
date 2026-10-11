@@ -36,6 +36,7 @@ def transcribe(audio_bytes, filename="voice-note.wav", mime="audio/wav"):
 
 
 def available_engines():
+    """Speech-to-text engines usable now (Groq Whisper, Gemini, free Google speech)."""
     names = []
     if setting("GROQ_API_KEY"):
         names.append("Groq Whisper")

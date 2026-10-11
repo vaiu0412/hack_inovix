@@ -35,6 +35,7 @@ def as_list(disruptions):
 
 
 def base_delay(disruption):
+    """Minutes a disruption adds at the blocked point, from its type, severity and duration."""
     severity = disruption.get("severity", "medium")
     duration = int(disruption.get("duration_min") or 0)
     if disruption.get("type") == "breakdown":
@@ -67,7 +68,7 @@ def find_affected(disruption, data):
             continue
         block_index = route.index(road_id)
         own = deliveries[deliveries["vehicle_id"] == vid].sort_values("stop_order")
-        downstream = own[own["road_id"].apply(lambda r: r in route and route.index(r) >= block_index)]
+        downstream = own[[r in route and route.index(r) >= block_index for r in own["road_id"]]]
         for k, (_, d) in enumerate(downstream.iterrows()):
             rows.append((d, k, d["road_id"] == road_id))
     return rows

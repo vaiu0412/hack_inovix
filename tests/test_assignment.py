@@ -1,7 +1,8 @@
 """Work assignment: new order -> best match -> assign (one transaction) -> the partner's step-by-step flow."""
 import pytest
 
-from modules import assign, auth, partner_scope as scope, store
+from modules import assign, auth, store
+from modules import partner_scope as scope
 
 
 @pytest.fixture()
@@ -42,8 +43,9 @@ def test_best_match_is_the_nearest_partner_whose_vehicle_fits(east):
     best = assign.best_match(small, "CBE-E")
     assert best["partner_id"] == "DP102" and "km away" in best["reason"] and "🏍️ fits" in best["reason"]
     large, _ = new_order(east, area="Ukkadam", size="large")
-    found = assign.candidates(store.deliveries_df().set_index("delivery_id").loc[large].to_dict() | {"delivery_id": large},
-                              "CBE-E")
+    found = assign.candidates(
+        store.deliveries_df().set_index("delivery_id").loc[large].to_dict() | {"delivery_id": large}, "CBE-E"
+    )
     assert found and all(c["vehicle_type"] in ("van", "truck") for c in found)   # a bike can't take a large parcel
     with pytest.raises(ValueError, match="doesn't fit"):
         assign.assign(east, large, "DP102")
@@ -95,8 +97,11 @@ def test_auto_assign_all_respects_capacity(east):
     assert assign.apply_plan(east, plan) == sum(1 for row in plan if row["partner_id"])
     load = assign.workload("CBE-E")
     assert (load["open"] <= load["limit"]).all()
-    assert assign.unassigned_orders("CBE-E").empty or all(r["partner_id"] is None for r in plan
-                                                          if r["delivery_id"] in set(assign.unassigned_orders("CBE-E")["delivery_id"]))
+    assert assign.unassigned_orders("CBE-E").empty or all(
+        r["partner_id"] is None
+        for r in plan
+        if r["delivery_id"] in set(assign.unassigned_orders("CBE-E")["delivery_id"])
+    )
 
 
 def test_csv_import_reports_bad_rows(east):

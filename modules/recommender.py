@@ -9,7 +9,6 @@ Rules (most urgent first):
 Every action carries a plain-English "why" and drafted messages.
 Works for one disruption or several at once (detours never use another blocked road).
 """
-import json
 import re
 
 from modules.data_loader import NOW_MIN, haversine_km, min_to_hhmm
@@ -34,6 +33,7 @@ TYPE_WORDS = {
 
 # ---------------------------------------------------------------- helpers
 def travel_min(km):
+    """Driving minutes for a straight-line distance, using the road factor and city speed."""
     return km * ROAD_FACTOR / URBAN_SPEED_KMPH * 60
 
 
@@ -68,6 +68,7 @@ def find_alternate_road(blocked_road_id, data, avoid=()):
 
 
 def nearest_backup(data, lat, lng):
+    """The closest backup vehicle (status 'backup') to a point, or None."""
     backups = data["vehicles"].set_index("vehicle_id")
     backups = backups[backups["status"] == "backup"]
     if backups.empty:
@@ -189,32 +190,48 @@ def recommend(impact, disruptions, data, polish=True):
         short = {"title": f"Move {row['delivery_id']} to {backup.name}",
                  "why_short": f"{row['priority'].capitalize()} parcel, {_spare(row['slack_min'])}.\n{free}",
                  "impact_short": f"Arrives {eta_txt} · saves {max(saved, 0)} min"}
-        actions.append({
-            **short,
-            "action_type": "reassign",
-            "target": f"delivery {row['delivery_id']}",
-            "description": f"Move {row['delivery_id']} ({row['customer']}) from {row['original_vehicle']} "
-                           f"to backup {backup.name} ({backup['driver']})",
-            "expected_delay_saved_min": max(saved, 0),
-            "extra_km": round((to_pickup + to_customer) * ROAD_FACTOR, 1),
-            "deliveries_protected": [row["delivery_id"]],
-            "why": why,
-            "risk_label": row["risk_label"],
-            "messages": [
-                {"to": f"{backup['driver']} (driver, {backup.name})", "kind": "driver", "vehicle_id": backup.name,
-                 "text": f"{backup['driver']}, please collect {row['delivery_id']} from "
-                         f"{source['driver']} ({row['original_vehicle']}) and deliver to "
-                         f"{row['customer']}, {row['address_area']} by {eta_txt}. "
-                         f"Avoid {name_of(row['cause_road_id'])}."},
-                {"to": f"{source['driver']} (driver, {row['original_vehicle']})", "kind": "driver",
-                 "vehicle_id": row["original_vehicle"],
-                 "text": f"{source['driver']}, hand {row['delivery_id']} ({row['customer']}) to {backup['driver']} "
-                         f"in the backup {backup['type']} {backup.name} when they reach you. Continue with your other stops."},
-                {"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer",
-                 "customer": row["customer"], "phone": row["customer_phone"],
-                 "text": _customer_sms(row, eta_txt, f"We've moved it to a dedicated vehicle ({backup['reg_no']}). ")},
-            ],
-        })
+        actions.append(
+            {
+                **short,
+                "action_type": "reassign",
+                "target": f"delivery {row['delivery_id']}",
+                "description": f"Move {row['delivery_id']} ({row['customer']}) from {row['original_vehicle']} "
+                f"to backup {backup.name} ({backup['driver']})",
+                "expected_delay_saved_min": max(saved, 0),
+                "extra_km": round((to_pickup + to_customer) * ROAD_FACTOR, 1),
+                "deliveries_protected": [row["delivery_id"]],
+                "why": why,
+                "risk_label": row["risk_label"],
+                "messages": [
+                    {
+                        "to": f"{backup['driver']} (driver, {backup.name})",
+                        "kind": "driver",
+                        "vehicle_id": backup.name,
+                        "text": f"{backup['driver']}, please collect {row['delivery_id']} from "
+                        f"{source['driver']} ({row['original_vehicle']}) and deliver to "
+                        f"{row['customer']}, {row['address_area']} by {eta_txt}. "
+                        f"Avoid {name_of(row['cause_road_id'])}.",
+                    },
+                    {
+                        "to": f"{source['driver']} (driver, {row['original_vehicle']})",
+                        "kind": "driver",
+                        "vehicle_id": row["original_vehicle"],
+                        "text": f"{source['driver']}, hand {row['delivery_id']} ({row['customer']}) to "
+                        f"{backup['driver']} in the backup {backup['type']} {backup.name} when they reach you. "
+                        "Continue with your other stops.",
+                    },
+                    {
+                        "to": f"{row['customer']} ({row['customer_phone']})",
+                        "kind": "customer",
+                        "customer": row["customer"],
+                        "phone": row["customer_phone"],
+                        "text": _customer_sms(
+                            row, eta_txt, f"We've moved it to a dedicated vehicle ({backup['reg_no']}). "
+                        ),
+                    },
+                ],
+            }
+        )
         after.loc[idx, ["vehicle_id", "new_eta_min", "action"]] = [backup.name, int(eta), "reassigned"]
 
     # ---- 2. Remaining Critical / High -> reroute their vehicle (one action per vehicle),
@@ -244,7 +261,7 @@ def recommend(impact, disruptions, data, polish=True):
             group["roads"].append(road)
             group["km"], group["min"] = max(group["km"], km), max(group["min"], minutes)
 
-        def rerouted_delay(parts):
+        def rerouted_delay(parts, detours, by_alt):
             delay, cascade = 0, {}
             for p in parts:
                 if p["road_id"] in detours:
@@ -254,7 +271,7 @@ def recommend(impact, disruptions, data, polish=True):
                     delay += p["delay_min"]
             return delay + sum(by_alt[a]["min"] + k * CASCADE_STEP_MIN for a, k in cascade.items())
 
-        new_delays = own["parts"].apply(rerouted_delay)
+        new_delays = own["parts"].apply(rerouted_delay, args=(detours, by_alt))
         saved = int((own["delay_min"] - new_delays).clip(lower=0).max())
         total_km = round(sum(g["km"] for g in by_alt.values()), 1)
         total_min = sum(g["min"] for g in by_alt.values())

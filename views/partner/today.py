@@ -3,7 +3,8 @@ from html import escape
 
 import streamlit as st
 
-from modules import guards, partner_scope as scope, partner_ui, ui
+from modules import guards, partner_ui, ui
+from modules import partner_scope as scope
 
 guards.require_role("partner")
 dp_id = guards.dp_id()  # from the validated session only
@@ -17,9 +18,14 @@ worst = next((r for r in ("Critical", "High", "Medium") if r in set(deliveries["
 with st.container(horizontal=True, vertical_alignment="center", gap="small"):
     st.markdown(ui.pill_html(ui.partner_state(profile["status"], worst)), unsafe_allow_html=True)
     choices = ["on_duty", "on_break"] + (["standby"] if profile["status"] == "standby" else [])
-    status = st.segmented_control("Status", choices, default=profile["status"] if profile["status"] in choices else None,
-                                  format_func=lambda s: ui.PARTNER_STATUS[s][0], label_visibility="collapsed",
-                                  key="my_status")
+    status = st.segmented_control(
+        "Status",
+        choices,
+        default=profile["status"] if profile["status"] in choices else None,
+        format_func=lambda s: ui.PARTNER_STATUS[s][0],
+        label_visibility="collapsed",
+        key="my_status",
+    )
 if status and status != profile["status"]:
     scope.set_status(dp_id, branch, status)
     st.rerun()
@@ -46,10 +52,13 @@ if len(new_work):
     with ui.card("new_work"):
         st.markdown(f"<p class='dp-h3'>{ui.icon('assignment')} New work · {len(new_work)}</p>", unsafe_allow_html=True)
         for d in new_work.to_dict("records"):
-            st.markdown(f"<div class='dp-row'><div class='main'><b>{escape(d['delivery_id'])} · {escape(d['customer'])}</b>"
-                        f"<small>{escape(d['address_area'])} · {escape(str(d.get('package_size') or 'small').capitalize())}"
-                        f" · due {d['deadline']}</small></div><div class='end'>{partner_ui.stage_pill(d['status'])}</div>"
-                        f"</div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div class='dp-row'><div class='main'><b>{escape(d['delivery_id'])} · {escape(d['customer'])}</b>"
+                f"<small>{escape(d['address_area'])} · {escape(str(d.get('package_size') or 'small').capitalize())}"
+                f" · due {d['deadline']}</small></div><div class='end'>{partner_ui.stage_pill(d['status'])}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
             partner_ui.step_buttons(dp_id, branch, d, key=f"new_{d['delivery_id']}")
 
 # ---------------------------------------------------------------- next stop + progress

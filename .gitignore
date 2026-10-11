@@ -14,3 +14,4 @@ data/voice/
 # Office lock files and slide build images (already inside the .pptx)
 ~$*
 docs/presentation/assets/
+.ruff_cache/

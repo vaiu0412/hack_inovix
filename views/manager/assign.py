@@ -8,7 +8,8 @@ import plotly.graph_objects as go
 import streamlit as st
 from streamlit_folium import st_folium
 
-from modules import assign, guards, manager_ui as mui, ui
+from modules import assign, guards, ui
+from modules import manager_ui as mui
 
 guards.require_role("branch_admin")
 ui.header("Assign Work")

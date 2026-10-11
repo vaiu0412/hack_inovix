@@ -2,13 +2,27 @@
 plus "Can't deliver", which opens Report with the delivery already filled in."""
 import streamlit as st
 
-from modules import assign, guards, partner_scope as scope, ui
+from modules import assign, guards, ui
+from modules import partner_scope as scope
 from modules.report_ui import prefill
 
-ICONS = {"accepted": ":material/thumb_up:", "picked_up": ":material/inventory_2:", "in_transit": ":material/play_arrow:",
-         "delivered": ":material/check:"}
-STAGE_STATE = {"assigned": "available", "accepted": "normal", "picked_up": "normal", "in_transit": "normal",
-               "pending": "normal", "delayed": "delayed", "rescheduled": "delayed", "delivered": "done", "failed": "critical"}
+ICONS = {
+    "accepted": ":material/thumb_up:",
+    "picked_up": ":material/inventory_2:",
+    "in_transit": ":material/play_arrow:",
+    "delivered": ":material/check:",
+}
+STAGE_STATE = {
+    "assigned": "available",
+    "accepted": "normal",
+    "picked_up": "normal",
+    "in_transit": "normal",
+    "pending": "normal",
+    "delayed": "delayed",
+    "rescheduled": "delayed",
+    "delivered": "done",
+    "failed": "critical",
+}
 
 
 def stage_pill(status):

@@ -4,7 +4,8 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from modules import assign, guards, manager_ui as mui, store, ui
+from modules import assign, guards, store, ui
+from modules import manager_ui as mui
 
 guards.require_role("branch_admin")
 ui.header("Deliveries")
@@ -27,9 +28,14 @@ with st.container(horizontal=True, vertical_alignment="center", gap="small"):
                           format_func=ui.status_text, label_visibility="collapsed", key="del_state")
     priority_pick = st.pills("Priority", ["medical", "perishable", "express", "standard"], selection_mode="multi",
                              format_func=str.capitalize, label_visibility="collapsed", key="del_priority")
-    partner_pick = st.selectbox("Partner", [None] + sorted(set(partner_of.values())), key="del_partner", width=180,
-                                format_func=lambda p: "All partners" if p is None else f"{p} · {ctx['partner_names'][p]}",
-                                label_visibility="collapsed")
+    partner_pick = st.selectbox(
+        "Partner",
+        [None] + sorted(set(partner_of.values())),
+        key="del_partner",
+        width=180,
+        format_func=lambda p: "All partners" if p is None else f"{p} · {ctx['partner_names'][p]}",
+        label_visibility="collapsed",
+    )
 view = deliveries
 if query:
     hay = (view["customer"] + " " + view["address_area"] + " " + view["delivery_id"]).str.lower()

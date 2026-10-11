@@ -30,7 +30,6 @@ VEHICLE_EMOJI = {"bike": "🏍️", "car": "🚗", "van": "🚐", "truck": "🚚
 CATEGORIES = ("Parcel", "Food", "Medicine", "Groceries", "Documents", "Electronics")
 PRIORITIES = ("medical", "perishable", "express", "standard")
 REASONS = ("Partner busy", "Vehicle issue", "Closer partner", "Customer request", "Other")
-FLOW = ("assigned", "accepted", "picked_up", "in_transit", "delivered")
 NEXT = {"assigned": "accepted", "accepted": "picked_up", "picked_up": "in_transit", "in_transit": "delivered",
         "pending": "delivered", "delayed": "delivered", "rescheduled": "in_transit"}
 ACTION = {"accepted": "Accept", "picked_up": "Picked up", "in_transit": "Start", "delivered": "Delivered"}
@@ -98,10 +97,26 @@ def create_order(actor, customer, phone, area, category, priority, deadline, pac
         conn.execute(
             "INSERT INTO deliveries(delivery_id, customer, address_area, lat, lng, vehicle_id, road_id, stop_order, "
             "planned_eta, deadline, priority, customer_phone, status, original_vehicle, branch_id, created_by, "
-            "created_at, package_size, category, notes) VALUES (?,?,?,?,?,NULL,?,0,NULL,?,?,?,'unassigned',NULL,?,?,?,?,?,?)",
-            (delivery_id, str(customer).strip(), place["place"], place["lat"], place["lng"], place["road_id"], deadline,
-             priority, str(phone).strip(), branch, actor["user_id"], _now(), package_size, category,
-             str(notes or "").strip()))
+            "created_at, package_size, category, notes) "
+            "VALUES (?,?,?,?,?,NULL,?,0,NULL,?,?,?,'unassigned',NULL,?,?,?,?,?,?)",
+            (
+                delivery_id,
+                str(customer).strip(),
+                place["place"],
+                place["lat"],
+                place["lng"],
+                place["road_id"],
+                deadline,
+                priority,
+                str(phone).strip(),
+                branch,
+                actor["user_id"],
+                _now(),
+                package_size,
+                category,
+                str(notes or "").strip(),
+            ),
+        )
         store.log_event("delivery", f"New order {delivery_id} · {place['place']} · by {deadline}", branch_id=branch)
         store.audit(actor["user_id"], "order_created", delivery_id, {"place": place["place"]}, branch)
     return delivery_id, place
@@ -117,7 +132,10 @@ def validate_rows(df):
     for i, row in enumerate(df.fillna("").to_dict("records"), start=2):
         row = {k: str(row.get(k, "")).strip() for k in CSV_COLUMNS}
         row["category"] = row["category"].capitalize() or "Parcel"
-        row["priority"], row["package_size"] = row["priority"].lower() or "standard", row["package_size"].lower() or "small"
+        row["priority"], row["package_size"] = (
+            row["priority"].lower() or "standard",
+            row["package_size"].lower() or "small",
+        )
         problems, _ = check_order(row["customer"], row["phone"], row["area"], row["category"], row["priority"],
                                   row["deadline"], row["package_size"])
         if problems:
@@ -128,11 +146,13 @@ def validate_rows(df):
 
 
 def import_orders(actor, rows):
+    """Create orders from validated CSV rows. Returns the new delivery ids."""
     return [create_order(actor, r["customer"], r["phone"], r["area"], r["category"], r["priority"], r["deadline"],
                          r["package_size"], r.get("notes", ""))[0] for r in rows]
 
 
 def csv_template():
+    """The CSV text admins download to fill in new orders."""
     return pd.DataFrame([
         {"customer": "Anand Stores", "phone": "+91 90000 30001", "area": "Gandhipuram", "category": "Groceries",
          "priority": "standard", "deadline": "14:30", "package_size": "medium", "notes": "Back gate"},
@@ -148,7 +168,9 @@ def _critical_partners(branch):
     vehicles_hit = set()
     for issue in store.list_issues(store.OPEN_ISSUE_STATUSES, branch_id=branch):
         critical.add(issue["partner_id"])
-        vehicles_hit |= {r["vehicle_id"] for r in (issue.get("plan") or {}).get("risk", []) if r["risk_label"] == "Critical"}
+        vehicles_hit |= {
+            r["vehicle_id"] for r in (issue.get("plan") or {}).get("risk", []) if r["risk_label"] == "Critical"
+        }
     return critical, vehicles_hit
 
 
@@ -196,7 +218,9 @@ def candidates(order, branch, extra_load=None, partners=None, deliveries=None):
             continue
         if order.get("package_size", "small") not in FITS.get(kind, {"small"}):
             continue
-        own = deliveries[(deliveries["vehicle_id"] == p["vehicle_id"]) & (deliveries["delivery_id"] != order["delivery_id"])]
+        own = deliveries[
+            (deliveries["vehicle_id"] == p["vehicle_id"]) & (deliveries["delivery_id"] != order["delivery_id"])
+        ]
         own = own.sort_values("eta_min")
         load, limit = len(own) + extra_load.get(p["partner_id"], 0), MAX_STOPS.get(kind, 8)
         if load >= limit:
@@ -226,6 +250,7 @@ def _order(delivery_id, branch):
 
 
 def best_match(delivery_id, branch):
+    """The best partner for an order (lowest score), or None when nobody fits."""
     found = candidates(_order(delivery_id, branch), branch)
     return found[0] if found else None
 
@@ -255,10 +280,13 @@ def assign(actor, delivery_id, dp_id, reason="Assigned", source="manual"):
         order = _order(delivery_id, branch)
         if order["status"] in store.ACTIVE_DONE:
             raise ValueError(f"{delivery_id} is already {order['status']}.")
-        partner = conn.execute("SELECT p.*, v.type AS vehicle_type, v.current_lat AS lat, v.current_lng AS lng, "
-                               "v.route_roads, COALESCE(u.is_active, 1) AS account_active FROM partners p JOIN vehicles v "
-                               "ON v.vehicle_id = p.vehicle_id LEFT JOIN users u ON u.dp_id = p.partner_id "
-                               "WHERE p.partner_id = ? AND p.branch_id = ?", (dp_id, branch)).fetchone()
+        partner = conn.execute(
+            "SELECT p.*, v.type AS vehicle_type, v.current_lat AS lat, v.current_lng AS lng, "
+            "v.route_roads, COALESCE(u.is_active, 1) AS account_active FROM partners p JOIN vehicles v "
+            "ON v.vehicle_id = p.vehicle_id LEFT JOIN users u ON u.dp_id = p.partner_id "
+            "WHERE p.partner_id = ? AND p.branch_id = ?",
+            (dp_id, branch),
+        ).fetchone()
         if partner is None:
             raise PermissionError(f"{dp_id} is not a partner of your branch")
         if not partner["account_active"]:
@@ -282,11 +310,20 @@ def assign(actor, delivery_id, dp_id, reason="Assigned", source="manual"):
             conn.execute("UPDATE deliveries SET planned_eta = ? WHERE delivery_id = ?",
                          (min_to_hhmm(later.eta_min + added), later.delivery_id))
         now = _now()
-        conn.execute("UPDATE deliveries SET vehicle_id = ?, status = 'assigned', planned_eta = ?, assigned_at = ?, "
-                     "assigned_by = ?, accepted_at = NULL, picked_at = NULL, original_vehicle = COALESCE(original_vehicle, ?), "
-                     "note = ? WHERE delivery_id = ?",
-                     (partner["vehicle_id"], min_to_hhmm(eta), now, actor["user_id"], partner["vehicle_id"],
-                      "reassigned" if old else "", delivery_id))
+        conn.execute(
+            "UPDATE deliveries SET vehicle_id = ?, status = 'assigned', planned_eta = ?, assigned_at = ?, "
+            "assigned_by = ?, accepted_at = NULL, picked_at = NULL, original_vehicle = COALESCE(original_vehicle, ?), "
+            "note = ? WHERE delivery_id = ?",
+            (
+                partner["vehicle_id"],
+                min_to_hhmm(eta),
+                now,
+                actor["user_id"],
+                partner["vehicle_id"],
+                "reassigned" if old else "",
+                delivery_id,
+            ),
+        )
         _renumber(conn, partner["vehicle_id"])
         if old:
             _renumber(conn, order["vehicle_id"])
@@ -312,6 +349,7 @@ def assign(actor, delivery_id, dp_id, reason="Assigned", source="manual"):
 
 
 def reassign(actor, delivery_id, dp_id, reason):
+    """Move an order to another partner (same rules and messages as assign)."""
     return assign(actor, delivery_id, dp_id, reason=reason)
 
 
@@ -323,9 +361,11 @@ def unassign(actor, delivery_id, reason):
         if order["status"] in store.ACTIVE_DONE or not order["vehicle_id"]:
             raise ValueError(f"{delivery_id} can't be unassigned.")
         old = _partner_of_vehicle(conn, order["vehicle_id"], branch)
-        conn.execute("UPDATE deliveries SET vehicle_id = NULL, status = 'unassigned', planned_eta = NULL, stop_order = 0, "
-                     "assigned_at = NULL, assigned_by = NULL, accepted_at = NULL, picked_at = NULL WHERE delivery_id = ?",
-                     (delivery_id,))
+        conn.execute(
+            "UPDATE deliveries SET vehicle_id = NULL, status = 'unassigned', planned_eta = NULL, stop_order = 0, "
+            "assigned_at = NULL, assigned_by = NULL, accepted_at = NULL, picked_at = NULL WHERE delivery_id = ?",
+            (delivery_id,),
+        )
         _renumber(conn, order["vehicle_id"])
         if old:
             store.add_message(f"{delivery_id} removed from your list.", to_partner=old["partner_id"], branch_id=branch)
@@ -338,6 +378,7 @@ def unassign(actor, delivery_id, reason):
 
 
 def unassigned_orders(branch):
+    """Orders of the branch waiting for a partner, most urgent first."""
     df = store.deliveries_df(branch_id=branch)
     return df[df["status"] == "unassigned"].sort_values(["deadline_min", "delivery_id"])
 

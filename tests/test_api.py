@@ -31,7 +31,9 @@ def karthik(client):
 def test_login_errors_and_logout(client):
     assert client.get("/health").json()["status"] == "ok"
     assert client.post("/login", json={"identifier": "east.admin@deport.in", "password": "x"}).status_code == 401
-    assert client.post("/login", json={"identifier": "superadmin@deport.in", "password": "Super@123"}).status_code == 403
+    assert (
+        client.post("/login", json={"identifier": "superadmin@deport.in", "password": "Super@123"}).status_code == 403
+    )
     for _ in range(4):
         client.post("/login", json={"identifier": "DP103", "password": "x"})
     assert client.post("/login", json={"identifier": "DP103", "password": "x"}).status_code == 429
@@ -87,11 +89,16 @@ def test_report_accept_stays_in_branch(client, east, karthik):
 
 
 def test_needs_location_then_edit_then_reject(client, east):
-    issue = client.post("/issues", json={"partner_id": "DP102", "text": "accident somewhere ahead"}, headers=east).json()
+    issue = client.post(
+        "/issues", json={"partner_id": "DP102", "text": "accident somewhere ahead"}, headers=east
+    ).json()
     assert issue["plan"]["kind"] == "needs_location"
     fixed = client.patch(f"/issues/{issue['issue_id']}", json={"road_id": "R8"}, headers=east).json()
     assert fixed["status"] == "analysed" and fixed["problem"]["road_id"] == "R8"
-    assert client.post(f"/issues/{issue['issue_id']}/reject", json={"reason": "Cleared"}, headers=east).json()["status"] == "rejected"
+    assert (
+        client.post(f"/issues/{issue['issue_id']}/reject", json={"reason": "Cleared"}, headers=east).json()["status"]
+        == "rejected"
+    )
     assert client.post("/issues", json={"partner_id": "DP104", "text": "x"}, headers=east).status_code == 403
 
 

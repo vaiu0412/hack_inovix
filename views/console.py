@@ -2,7 +2,8 @@
 public sign-in page). Super Admins cannot sign in anywhere else; nobody else can sign in here."""
 import streamlit as st
 
-from modules import auth, login_ui as lui, ui
+from modules import auth, ui
+from modules import login_ui as lui
 
 lui.page_css()
 st.markdown("<div style='height:10vh'></div>", unsafe_allow_html=True)

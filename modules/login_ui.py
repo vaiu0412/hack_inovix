@@ -71,12 +71,15 @@ def demo_chips(kinds):
 
 
 def finish(user, remember=False):
+    """Complete sign-in for this session and reload into the user's dashboard."""
     guards.sign_in(user, remember=remember)
     st.rerun()
 
 
 def page_css():
-    st.markdown(f"""<style>
+    """Full-screen dark backdrop and glass card styles for the sign-in pages."""
+    st.markdown(
+        f"""<style>
 [data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], header[data-testid="stHeader"],
 [data-testid="stToolbar"], [data-testid="stDecoration"] {{ display: none !important; }}
 [data-testid="stMainBlockContainer"] {{ max-width: 100% !important; padding: 1rem 1.25rem 2rem !important; }}
@@ -90,11 +93,13 @@ def page_css():
 .lg-bg circle {{ fill: #60A5FA; filter: drop-shadow(0 0 6px #60A5FA); }} .lg-bg circle.amber {{ fill: #F59E0B;
   filter: drop-shadow(0 0 8px #F59E0B); }}
 @keyframes lg-dash {{ to {{ stroke-dashoffset: -880; }} }}
-.st-key-login_head, .st-key-login_card {{ position: relative; z-index: 1; max-width: 440px; width: 100%; margin-left: auto !important;
+.st-key-login_head, .st-key-login_card {{ position: relative; z-index: 1; max-width: 440px; width: 100%;
+  margin-left: auto !important;
   margin-right: auto !important; }}
 .st-key-login_head {{ margin-top: 6vh; text-align: center; align-items: center; }}
 .st-key-login_head [data-testid="stMarkdownContainer"], .st-key-login_head p {{ text-align: center !important; }}
-.lg-mark {{ display: inline-flex; align-items: center; gap: 14px; font-weight: 800; letter-spacing: .08em; font-size: 26px;
+.lg-mark {{ display: inline-flex; align-items: center; gap: 14px; font-weight: 800; letter-spacing: .08em;
+  font-size: 26px;
   color: #F8FAFC; }}
 .lg-mark svg {{ width: 52px; height: 52px; border-radius: 14px; animation: lg-glow 4s ease-in-out infinite alternate; }}
 @keyframes lg-glow {{ from {{ filter: drop-shadow(0 0 8px rgba(59,130,246,.45)); }}
@@ -102,15 +107,18 @@ def page_css():
 .lg-tag {{ color: #F8FAFC; font-size: 22px; font-weight: 750; letter-spacing: -.01em; margin: 14px 0 4px; }}
 .lg-sub {{ color: #94A3B8; font-size: 14px; margin: 0 0 14px; }}
 .lg-feats {{ display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 0 0 18px; }}
-.lg-feats span {{ display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; font-size: 12.5px;
+.lg-feats span {{ display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
+  font-size: 12.5px;
   font-weight: 600; color: #CBD5E1; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); }}
 .lg-feats .dp-ico {{ font-size: 16px; color: #93C5FD; }}
 .st-key-login_card {{ background: rgba(255,255,255,.07) !important; border: 1px solid rgba(255,255,255,.14);
   border-radius: 22px; padding: 28px 28px 20px; backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 20px 60px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.02);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+    box-shadow: 0 20px 60px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.02);
   animation: lg-in .25s ease-out both; }}
 @keyframes lg-in {{ from {{ opacity: 0; transform: translateY(10px); }} to {{ opacity: 1; transform: none; }} }}
-.st-key-login_card p.lg-title {{ font-size: 26px; font-weight: 750; letter-spacing: -.02em; margin: 0; line-height: 1.2; color: #F8FAFC; }}
+.st-key-login_card p.lg-title {{ font-size: 26px; font-weight: 750; letter-spacing: -.02em; margin: 0;
+  line-height: 1.2; color: #F8FAFC; }}
 .st-key-login_card p.lg-sub2 {{ color: #94A3B8; margin: 4px 0 16px; font-size: 15px; }}
 .st-key-login_card button {{ min-height: 48px; font-weight: 600; border-radius: 12px; }}
 .st-key-login_card input {{ min-height: 46px; }}
@@ -118,28 +126,37 @@ def page_css():
 .lg-or::before, .lg-or::after {{ content: ""; flex: 1; height: 1px; background: rgba(255,255,255,.12); }}
 .lg-link a {{ color: #93C5FD; text-decoration: none; font-weight: 600; font-size: 14px; }}
 .lg-link {{ text-align: right; margin-top: 6px; }}
-.lg-demo {{ font-size: 11px; font-weight: 800; letter-spacing: .08em; color: #FDE68A; margin: 14px 0 6px; text-align: center; }}
-[class*="st-key-demo_"] button {{ border-radius: 999px !important; min-height: 38px !important; font-size: 13px !important;
-  background: rgba(255,255,255,.06) !important; border: 1px solid rgba(253,230,138,.35) !important; color: #FDE68A !important;
+.lg-demo {{ font-size: 11px; font-weight: 800; letter-spacing: .08em; color: #FDE68A; margin: 14px 0 6px;
+  text-align: center; }}
+[class*="st-key-demo_"] button {{ border-radius: 999px !important; min-height: 38px !important;
+  font-size: 13px !important;
+  background: rgba(255,255,255,.06) !important; border: 1px solid rgba(253,230,138,.35) !important;
+    color: #FDE68A !important;
   backdrop-filter: blur(10px); }}
 .st-key-login_card [data-testid="stHorizontalBlock"] {{ flex-wrap: nowrap; align-items: center; gap: .5rem; }}
 .st-key-login_card [data-testid="stColumn"] {{ width: auto !important; min-width: 0; flex: 1 1 0 !important; }}
-.st-key-google_btn button p::before {{ content: ""; display: inline-block; width: 18px; height: 18px; margin-right: 10px;
+.st-key-google_btn button p::before {{ content: ""; display: inline-block; width: 18px; height: 18px;
+  margin-right: 10px;
   vertical-align: -3px; background: url("{GOOGLE_G}") no-repeat center / contain; }}
 .lg-console {{ background: linear-gradient(135deg, rgba(37,99,235,.25), rgba(124,58,237,.25)); color: #F8FAFC;
-  border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px; font-weight: 700;
+  border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px;
+    font-weight: 700;
   display: flex; gap: 12px; align-items: center; }}
 .lg-console svg {{ width: 34px; height: 34px; border-radius: 9px; }}
 .lg-console small {{ display: block; font-weight: 500; color: #CBD5E1; font-size: 13px; }}
 @media (max-width: 768px) {{
   .st-key-login_head {{ margin-top: 2vh; }} .lg-tag {{ font-size: 19px; }} .lg-feats {{ display: none; }}
-  .st-key-login_card {{ padding: 22px 18px 16px; border-radius: 18px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }}
+  .st-key-login_card {{ padding: 22px 18px 16px; border-radius: 18px; backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px); }}
 }}
 @media (prefers-reduced-motion: reduce) {{ .lg-bg path, .st-key-login_card, .lg-mark svg {{ animation: none; }} }}
-</style><div class="lg-bg">{ROUTES_SVG}</div>""", unsafe_allow_html=True)
+</style><div class="lg-bg">{ROUTES_SVG}</div>""",
+        unsafe_allow_html=True,
+    )
 
 
 def brand_header():
+    """Logo, tagline and the three feature chips above the sign-in card."""
     feats = "".join(f"<span>{ui.icon(name)}{escape(text)}</span>" for name, text in FEATURES)
     with st.container(key="login_head"):
         st.markdown(f"""<div class="lg-mark">{ui.MARK_SVG}<span>{ui.APP_NAME}</span></div>

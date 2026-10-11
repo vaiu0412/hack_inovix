@@ -49,6 +49,7 @@ _DUMMY = hash_password("timing-equaliser")  # verify against something even for 
 
 
 def normalize(identifier):
+    """Lower-case an email/ID and collapse spaces, so ' DP102 ' matches 'dp102'."""
     return " ".join(str(identifier or "").split()).lower()
 
 
@@ -121,6 +122,7 @@ def authenticate(identifier, password, portal="workspace"):
 
 
 def get_user(user_id):
+    """One account with its branch name and status, or None."""
     with store.connect() as conn:
         row = conn.execute("SELECT u.*, b.is_active AS branch_active, b.name AS branch_name FROM users u "
                            "LEFT JOIN branches b ON b.branch_id = u.branch_id WHERE u.user_id = ?",
@@ -156,6 +158,7 @@ def validate_session(token):
 
 
 def revoke_session(token):
+    """End a session (sign out); the token stops working everywhere."""
     if not token:
         return
     with store.connect() as conn:
@@ -171,10 +174,6 @@ def otp_by_email():
     from modules import mailer
 
     return mailer.configured()
-
-
-def sms_configured():  # older name, kept for callers/tests
-    return otp_by_email()
 
 
 def _mask(email):
@@ -251,6 +250,7 @@ def password_problem(password):
 
 
 def set_password(user_id, new_password, actor_user_id=None):
+    """Set a new password after checking its strength; signs the account out everywhere."""
     problem = password_problem(new_password)
     if problem:
         raise ValueError(problem)
@@ -276,6 +276,7 @@ def reset_password_with_otp(identifier, code, new_password):
 
 # ---------------------------------------------------------------- permissions + scope
 def has_permission(user, code):
+    """True if the user's role has this permission code."""
     if not user:
         return False
     with store.connect() as conn:
@@ -285,6 +286,7 @@ def has_permission(user, code):
 
 
 def require_permission(user, code):
+    """Raise PermissionError unless the user's role has this permission code."""
     if not has_permission(user, code):
         raise PermissionError(f"{ROLE_LABELS.get((user or {}).get('role'), 'This account')} cannot {code}")
 
@@ -340,9 +342,13 @@ if __name__ == "__main__":
 
     os.environ["RIPPLE_DB"] = str(Path(tempfile.mkdtemp()) / "auth.db")
     store.init_db()
-    for ident, pw, portal in [("east.admin@deport.in", "Admin@123", "workspace"), (" dp102 ", "Partner@123", "workspace"),
-                              ("superadmin@deport.in", "Super@123", "workspace"),
-                              ("superadmin@deport.in", "Super@123", "super"), ("dp102", "nope", "workspace")]:
+    for ident, pw, portal in [
+        ("east.admin@deport.in", "Admin@123", "workspace"),
+        (" dp102 ", "Partner@123", "workspace"),
+        ("superadmin@deport.in", "Super@123", "workspace"),
+        ("superadmin@deport.in", "Super@123", "super"),
+        ("dp102", "nope", "workspace"),
+    ]:
         user, error = authenticate(ident, pw, portal)
         print(f"{ident:24} {portal:9} ->", (user["role"], user["branch_id"]) if user else error)
     token = create_session("DP102", remember_me=True)

@@ -3,7 +3,8 @@ from html import escape
 
 import streamlit as st
 
-from modules import guards, partner_scope as scope, ui
+from modules import guards, ui
+from modules import partner_scope as scope
 from modules.report_ui import report_form
 
 guards.require_role("partner")

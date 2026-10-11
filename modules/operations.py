@@ -31,6 +31,7 @@ def _records(df, columns):
 
 
 def to_disruption(problem):
+    """The disruption fields of a parsed problem (type, road, severity, duration, vehicle, place)."""
     keys = ["type", "road_id", "road_name", "severity", "duration_min", "vehicle_id", "place"]
     return {k: problem.get(k) for k in keys}
 
@@ -67,8 +68,10 @@ def _ripple_plan(problem, data, branch_id=None):
     actions, before_after, after = recommend(risk, [*store.active_disruptions(branch_id), disruption], data)
     counts = risk["risk_label"].value_counts().to_dict() if len(risk) else {}
     if len(risk):
-        headline = (f"{summary['affected_deliveries']} deliveries on {len(summary['affected_vehicles'])} vehicles hit · "
-                    f"missed deadlines {before_after['misses_before']} → {before_after['misses_after']} with this plan")
+        headline = (
+            f"{summary['affected_deliveries']} deliveries on {len(summary['affected_vehicles'])} vehicles hit · "
+            f"missed deadlines {before_after['misses_before']} → {before_after['misses_after']} with this plan"
+        )
     else:
         headline = "No planned delivery is affected"
     plan = {
@@ -95,23 +98,44 @@ def _single_stop_plan(problem, data):
     new_eta = int(own["eta_min"].max()) + REATTEMPT_GAP_MIN
     late = new_eta > row["deadline_min"]
     driver = problem.get("reporter_name", "the driver")
+    deadline = row["deadline"]
+    why_short = f"Misses {deadline}, ask for a new slot." if late else f"Still fits before {deadline}."
+    why_end = (
+        f"the deadline {deadline} will be missed, so we ask the customer for a new slot."
+        if late
+        else f"it still fits before the {deadline} deadline."
+    )
     action = {
         "title": f"Re-attempt {row['delivery_id']} later",
-        "why_short": f"Customer not reachable.\n{'Misses ' + row['deadline'] + ', ask for a new slot.' if late else 'Still fits before ' + row['deadline'] + '.'}",
+        "why_short": f"Customer not reachable.\n{why_short}",
         "impact_short": f"New ETA {min_to_hhmm(new_eta)}",
-        "action_type": "reschedule_notify", "target": f"delivery {row['delivery_id']}",
+        "action_type": "reschedule_notify",
+        "target": f"delivery {row['delivery_id']}",
         "description": f"Re-attempt {row['customer']} at the end of {driver}'s route (~{min_to_hhmm(new_eta)})",
-        "why": (f"{row['customer']} isn't reachable now. Trying again after the other stops costs nothing; "
-                f"{'the deadline ' + row['deadline'] + ' will be missed, so we ask the customer for a new slot.' if late else 'it still fits before the ' + row['deadline'] + ' deadline.'}"),
-        "expected_delay_saved_min": 0, "extra_km": 0.0, "deliveries_protected": [row["delivery_id"]],
+        "why": (
+            f"{row['customer']} isn't reachable now. Trying again after the other stops costs nothing; "
+            f"{why_end}"
+        ),
+        "expected_delay_saved_min": 0,
+        "extra_km": 0.0,
+        "deliveries_protected": [row["delivery_id"]],
         "risk_label": "Medium" if late else "Low",
         "messages": [
-            {"to": f"{driver} (driver, {row['vehicle_id']})", "kind": "driver", "vehicle_id": row["vehicle_id"],
-             "text": f"{driver}, skip {row['customer']} for now and continue. Re-attempt at ~{min_to_hhmm(new_eta)}."},
-            {"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer", "customer": row["customer"],
-             "phone": row["customer_phone"],
-             "text": f"Hi {row['customer']}, our partner could not reach you. We will try again at about "
-                     f"{min_to_hhmm(new_eta)}. Reply with a better time if needed. – DEPORT Logistics"},
+            {
+                "to": f"{driver} (driver, {row['vehicle_id']})",
+                "kind": "driver",
+                "vehicle_id": row["vehicle_id"],
+                "text": f"{driver}, skip {row['customer']} for now and continue. "
+                f"Re-attempt at ~{min_to_hhmm(new_eta)}.",
+            },
+            {
+                "to": f"{row['customer']} ({row['customer_phone']})",
+                "kind": "customer",
+                "customer": row["customer"],
+                "phone": row["customer_phone"],
+                "text": f"Hi {row['customer']}, our partner could not reach you. We will try again at about "
+                f"{min_to_hhmm(new_eta)}. Reply with a better time if needed. – DEPORT Logistics",
+            },
         ],
     }
     return {
@@ -242,11 +266,21 @@ def accept(issue_id, decided_by="Manager", branch_id=None):
                                           branch_id=branch)
                         changed["partners_told"].add(partner["partner_id"])
                 elif message.get("kind") == "customer":
-                    store.add_message(message["text"], to_customer=message.get("customer"), to_phone=message.get("phone"),
-                                      channel="sms", issue_id=issue_id, branch_id=branch)
+                    store.add_message(
+                        message["text"],
+                        to_customer=message.get("customer"),
+                        to_phone=message.get("phone"),
+                        channel="sms",
+                        issue_id=issue_id,
+                        branch_id=branch,
+                    )
                     changed["customers_told"] += 1
         reporter = issue.get("partner_id")
-        if reporter and reporter not in changed["partners_told"] and reporter in {p["partner_id"] for p in partner_by_vehicle.values()}:
+        if (
+            reporter
+            and reporter not in changed["partners_told"]
+            and reporter in {p["partner_id"] for p in partner_by_vehicle.values()}
+        ):
             store.add_message(f"Thanks, your report was handled: {plan['headline']}.", to_partner=reporter,
                               issue_id=issue_id, branch_id=branch)
 
@@ -254,7 +288,9 @@ def accept(issue_id, decided_by="Manager", branch_id=None):
         if plan["kind"] == "ripple" and plan.get("disruption", {}).get("road_id") and \
                 plan["disruption"]["type"] not in ("breakdown",) + NO_RIPPLE_TYPES:
             store.add_disruption(issue_id, plan["disruption"], branch_id=branch)
-        store.update_issue(issue_id, status="accepted", decided_at=store.now_stamp(), decision_note=f"Accepted by {decided_by}")
+        store.update_issue(
+            issue_id, status="accepted", decided_at=store.now_stamp(), decision_note=f"Accepted by {decided_by}"
+        )
         text = (f"{decided_by} accepted the plan for #{issue_id}: {changed['deliveries']} deliveries updated, "
                 f"{len(changed['partners_told'])} partners and {changed['customers_told']} customers notified")
         store.log_event("decision", text, issue_id, branch_id=branch)
@@ -264,6 +300,7 @@ def accept(issue_id, decided_by="Manager", branch_id=None):
 
 
 def reject(issue_id, reason="Not needed", decided_by="Manager", branch_id=None):
+    """Reject a plan with a reason, close the issue and tell the reporter."""
     issue = _issue_in_branch(issue_id, branch_id)
     store.update_issue(issue_id, status="rejected", decided_at=store.now_stamp(), decision_note=reason)
     if issue.get("partner_id"):
@@ -287,6 +324,7 @@ def edit_problem(issue_id, branch_id=None, **changes):
 
 
 def mark_delivered(delivery_id, partner_name="Partner", branch_id=None):
+    """Mark a delivery as delivered and log it in the branch history."""
     store.update_delivery(delivery_id, branch_id=branch_id, status="delivered")
     store.log_event("delivery", f"{partner_name} delivered {delivery_id}", branch_id=branch_id)
 

@@ -9,8 +9,6 @@ from modules import issues, store
 from modules.data_loader import load_all, nearest_place
 
 PARTNER_STATUSES = ("on_duty", "on_break", "standby")
-PROFILE_FIELDS = ["partner_id", "name", "phone", "status", "vehicle_id", "reg_no", "vehicle_type", "area", "assigned",
-                  "delivered", "pending", "urgent", "next_stop", "next_eta", "shift", "languages", "rating"]
 
 
 def _own(dp_id, branch_id):
@@ -28,6 +26,7 @@ def _own(dp_id, branch_id):
 
 # ---------------------------------------------------------------- reads (own rows only)
 def get_partner_profile(dp_id, branch_id):
+    """The partner's own profile: vehicle, shift, counts and next stop."""
     partner, vehicle = _own(dp_id, branch_id)
     deliveries = get_partner_deliveries(dp_id, branch_id)
     todo = deliveries[~deliveries["status"].isin(["delivered", "failed"])].sort_values("eta_min")
@@ -80,6 +79,7 @@ def get_partner_route(dp_id, branch_id):
 
 
 def get_partner_notifications(dp_id, branch_id, unread_only=False):
+    """The partner's own messages (only unread ones if asked)."""
     _own(dp_id, branch_id)
     messages = store.messages_for(dp_id, limit=50)
     return [m for m in messages if not m["read"]] if unread_only else messages
@@ -125,11 +125,13 @@ def advance_delivery(dp_id, branch_id, delivery_id, to_status, note=""):
 
 
 def mark_notifications_read(dp_id, branch_id):
+    """Mark all of the partner's own messages as read."""
     _own(dp_id, branch_id)
     store.mark_messages_read(dp_id)
 
 
 def set_status(dp_id, branch_id, status):
+    """Change the partner's own status (on duty, on break, standby)."""
     partner, _ = _own(dp_id, branch_id)
     if status not in PARTNER_STATUSES:
         raise ValueError(f"Unknown status {status}")

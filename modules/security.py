@@ -19,6 +19,7 @@ def hash_password(password, salt_hex=None):
 
 
 def verify_password(password, hash_hex, salt_hex):
+    """True if the password matches the stored hash (constant-time compare)."""
     candidate, _ = hash_password(password, salt_hex)
     return hmac.compare_digest(candidate, hash_hex)
 

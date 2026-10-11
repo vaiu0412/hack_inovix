@@ -1,7 +1,8 @@
 """Alerts: what changed, what is affected, what to do – then one tap to apply the plan."""
 import streamlit as st
 
-from modules import guards, manager_ui as mui, store, ui
+from modules import guards, store, ui
+from modules import manager_ui as mui
 
 guards.require_role("branch_admin")
 ctx = mui.context()

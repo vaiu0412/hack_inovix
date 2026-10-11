@@ -35,6 +35,7 @@ def _new_branch_id(conn, city, area):
 
 # ---------------------------------------------------------------- Super Admin
 def create_branch(actor, name, city, area, address="", lat=None, lng=None):
+    """Create a branch (Super Admin). Returns the new branch id."""
     auth.require_permission(actor, "manage_branches")
     _require_super(actor)
     if not (name or "").strip() or not (city or "").strip() or not (area or "").strip():
@@ -49,20 +50,25 @@ def create_branch(actor, name, city, area, address="", lat=None, lng=None):
 
 
 def set_branch_active(actor, branch_id, active):
+    """Switch a branch on or off (Super Admin)."""
     auth.require_permission(actor, "manage_branches")
     with store.connect() as conn:
         if not conn.execute("UPDATE branches SET is_active = ? WHERE branch_id = ?", (int(active), branch_id)).rowcount:
             raise ValueError(f"Unknown branch {branch_id}")
-    store.audit(actor["user_id"], "branch_activated" if active else "branch_deactivated", branch_id, branch_id=branch_id)
+    store.audit(
+        actor["user_id"], "branch_activated" if active else "branch_deactivated", branch_id, branch_id=branch_id
+    )
 
 
 def branch_admins_df():
+    """All Branch Admin accounts with their branch and last sign-in."""
     return store._df("SELECT u.user_id, u.display_name, u.email, u.phone, u.branch_id, b.name AS branch, "
                      "u.is_active, u.last_login FROM users u LEFT JOIN branches b ON b.branch_id = u.branch_id "
                      "WHERE u.role_id = 'branch_admin' ORDER BY u.branch_id, u.display_name")
 
 
 def create_branch_admin(actor, display_name, email, phone, branch_id, temp_password):
+    """Create a Branch Admin account with a temporary password (Super Admin)."""
     auth.require_permission(actor, "manage_branch_admins")
     _require_super(actor)
     email = auth.normalize(email)
@@ -76,7 +82,9 @@ def create_branch_admin(actor, display_name, email, phone, branch_id, temp_passw
     hash_hex, salt = hash_password(temp_password)
     user_id = email.split("@")[0]
     with store.connect() as conn:
-        if conn.execute("SELECT 1 FROM users WHERE lower(email) = ? OR lower(user_id) = ?", (email, user_id)).fetchone():
+        if conn.execute(
+            "SELECT 1 FROM users WHERE lower(email) = ? OR lower(user_id) = ?", (email, user_id)
+        ).fetchone():
             raise ValueError("An account with this email already exists")
         conn.execute("INSERT INTO users(user_id, email, phone, display_name, role_id, branch_id, password_hash, salt, "
                      "created_by, created_at) VALUES (?,?,?,?, 'branch_admin', ?,?,?,?,?)",
@@ -108,6 +116,7 @@ def set_user_active(actor, user_id, active):
 
 
 def reset_admin_password(actor, user_id, temp_password):
+    """Give a Branch Admin a new temporary password and sign them out everywhere."""
     auth.require_permission(actor, "manage_branch_admins")
     target = auth.get_user(user_id)
     if not target or target["role"] != "branch_admin":
@@ -183,6 +192,7 @@ def set_partner_email(actor, dp_id, email):
 
 
 def set_partner_active(actor, dp_id, active):
+    """Activate or deactivate a delivery partner's account."""
     set_user_active(actor, dp_id, active)
 
 

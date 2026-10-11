@@ -20,9 +20,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from modules.data_loader import (DATA_DIR, NOW_MIN, hhmm_to_min, load_all, load_branches, load_partners,
-                                 nearest_place)
 from modules import geometry
+from modules.data_loader import DATA_DIR, hhmm_to_min, load_all, load_branches, load_partners, nearest_place
 from modules.security import demo_hash
 
 SCHEMA_VERSION = 6
@@ -165,6 +164,7 @@ def now_stamp():
 
 
 def now_iso():
+    """Current local time as 'YYYY-MM-DD HH:MM:SS'."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -213,6 +213,7 @@ def _bump(conn):
 
 
 def version():
+    """Data version number; it goes up on every write so screens know to refresh."""
     with connect() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = 'version'").fetchone()
     return int(row["value"]) if row else 0
@@ -305,7 +306,9 @@ def _migrate_v3(conn):
     partner_branch = dict(zip(load_partners()["partner_id"], load_partners()["branch_id"]))
     vehicles = load_all()["vehicles"]
     for partner_id, branch in partner_branch.items():
-        conn.execute("UPDATE partners SET branch_id = ? WHERE partner_id = ? AND branch_id IS NULL", (branch, partner_id))
+        conn.execute(
+            "UPDATE partners SET branch_id = ? WHERE partner_id = ? AND branch_id IS NULL", (branch, partner_id)
+        )
     for v in vehicles.itertuples():
         conn.execute("INSERT OR IGNORE INTO vehicles VALUES (?,?,?,?,?,?,?,?,?)",
                      (v.vehicle_id, v.reg_no, v.type, v.status, v.current_lat, v.current_lng,
@@ -382,9 +385,11 @@ def _migrate_v6(conn):
         if column not in have:
             conn.execute(f"ALTER TABLE deliveries ADD COLUMN {column} {kind}")
     conn.execute("UPDATE deliveries SET status = 'in_transit' WHERE status = 'pending'")
-    conn.execute("UPDATE deliveries SET package_size = COALESCE((SELECT CASE v.type WHEN 'van' THEN 'medium' "
-                 "WHEN 'truck' THEN 'large' ELSE 'small' END FROM vehicles v WHERE v.vehicle_id = deliveries.vehicle_id), "
-                 "'small') WHERE package_size IS NULL OR package_size = ''")
+    conn.execute(
+        "UPDATE deliveries SET package_size = COALESCE((SELECT CASE v.type WHEN 'van' THEN 'medium' "
+        "WHEN 'truck' THEN 'large' ELSE 'small' END FROM vehicles v WHERE v.vehicle_id = deliveries.vehicle_id), "
+        "'small') WHERE package_size IS NULL OR package_size = ''"
+    )
     _set_version(conn, 6)
 
 
@@ -460,16 +465,19 @@ def _df(sql, params=()):
 
 
 def branches_df():
+    """All branches."""
     return _df("SELECT * FROM branches ORDER BY branch_id")
 
 
 def get_branch(branch_id):
+    """One branch as a dict, or None."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM branches WHERE branch_id = ?", (branch_id,)).fetchone()
     return dict(row) if row else None
 
 
 def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
+    """Deliveries (optionally one vehicle, one branch, open only) with deadline/ETA in minutes."""
     clauses, params = [], []
     if vehicle_id:
         clauses.append("vehicle_id = ?")
@@ -488,6 +496,7 @@ def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
 
 
 def vehicles_df(branch_id=None):
+    """Vehicles with their driver, optionally for one branch."""
     df = _df("SELECT v.*, p.name AS driver, p.partner_id FROM vehicles v "
              "LEFT JOIN partners p ON p.vehicle_id = v.vehicle_id"
              + (" WHERE v.branch_id = ?" if branch_id else "") + " ORDER BY v.vehicle_id",
@@ -526,21 +535,37 @@ def partners_df(branch_id=None):
         own = deliveries[deliveries["vehicle_id"] == p.vehicle_id]
         todo = own[~own["status"].isin(["delivered", "failed"])].sort_values("eta_min")
         nxt = todo.iloc[0] if len(todo) else None
-        rows.append({
-            "partner_id": p.partner_id, "name": p.name, "phone": p.phone, "email": p.email,
-            "status": p.status if p.account_active else "off_duty", "account_active": bool(p.account_active),
-            "branch_id": p.branch_id, "vehicle_id": p.vehicle_id, "reg_no": p.reg_no,
-            "vehicle_type": p.vehicle_type, "area": nearest_place(p.lat, p.lng), "lat": p.lat, "lng": p.lng,
-            "assigned": len(own), "delivered": int((own["status"] == "delivered").sum()),
-            "pending": len(todo),
-            "urgent": int(todo["priority"].isin(["medical", "perishable"]).sum()),
-            "next_stop": f"{nxt['customer']}, {nxt['address_area']}" if nxt is not None else "—",
-            "next_eta": nxt["planned_eta"] if nxt is not None else "—",
-            "next_road": nxt["road_id"] if nxt is not None else (p.route_roads.split("|")[0] if p.route_roads else None),
-            "open_issues": int(open_by_partner.get(p.partner_id, 0)),
-            "shift": f"{p.shift_start}–{p.shift_end}", "languages": (p.languages or "").replace("|", ", "),
-            "rating": p.rating, "route_roads": p.route_roads or "",
-        })
+        rows.append(
+            {
+                "partner_id": p.partner_id,
+                "name": p.name,
+                "phone": p.phone,
+                "email": p.email,
+                "status": p.status if p.account_active else "off_duty",
+                "account_active": bool(p.account_active),
+                "branch_id": p.branch_id,
+                "vehicle_id": p.vehicle_id,
+                "reg_no": p.reg_no,
+                "vehicle_type": p.vehicle_type,
+                "area": nearest_place(p.lat, p.lng),
+                "lat": p.lat,
+                "lng": p.lng,
+                "assigned": len(own),
+                "delivered": int((own["status"] == "delivered").sum()),
+                "pending": len(todo),
+                "urgent": int(todo["priority"].isin(["medical", "perishable"]).sum()),
+                "next_stop": f"{nxt['customer']}, {nxt['address_area']}" if nxt is not None else "—",
+                "next_eta": nxt["planned_eta"] if nxt is not None else "—",
+                "next_road": nxt["road_id"]
+                if nxt is not None
+                else (p.route_roads.split("|")[0] if p.route_roads else None),
+                "open_issues": int(open_by_partner.get(p.partner_id, 0)),
+                "shift": f"{p.shift_start}–{p.shift_end}",
+                "languages": (p.languages or "").replace("|", ", "),
+                "rating": p.rating,
+                "route_roads": p.route_roads or "",
+            }
+        )
     columns = ["partner_id", "name", "phone", "email", "status", "account_active", "branch_id", "vehicle_id", "reg_no",
                "vehicle_type", "area", "lat", "lng", "assigned", "delivered", "pending", "urgent", "next_stop",
                "next_eta", "next_road", "open_issues", "shift", "languages", "rating", "route_roads"]
@@ -555,6 +580,7 @@ def get_partner(partner_id, branch_id=None):
 
 
 def assignment_history(delivery_id=None, branch_id=None, limit=200):
+    """Who assigned which order to whom and why, newest first."""
     clauses, params = [], []
     if delivery_id:
         clauses.append("delivery_id = ?")
@@ -573,6 +599,7 @@ def _decode_issue(row):
 
 
 def get_issue(issue_id, branch_id=None):
+    """One issue with its JSON fields decoded, optionally only within a branch."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM issues WHERE issue_id = ?" + (" AND branch_id = ?" if branch_id else ""),
                            (issue_id, branch_id) if branch_id else (issue_id,)).fetchone()
@@ -580,6 +607,7 @@ def get_issue(issue_id, branch_id=None):
 
 
 def list_issues(statuses=None, partner_id=None, branch_id=None):
+    """Issues filtered by status, partner and branch, newest first."""
     clauses, params = [], []
     if statuses:
         clauses.append(f"status IN ({','.join('?' * len(statuses))})")
@@ -596,13 +624,19 @@ def list_issues(statuses=None, partner_id=None, branch_id=None):
 
 
 def active_disruptions(branch_id=None):
+    """Disruptions still in force (from accepted plans), optionally for one branch."""
     with connect() as conn:
-        rows = conn.execute("SELECT data FROM disruptions WHERE active = 1" + (" AND branch_id = ?" if branch_id else "")
-                            + " ORDER BY id", (branch_id,) if branch_id else ()).fetchall()
+        rows = conn.execute(
+            "SELECT data FROM disruptions WHERE active = 1"
+            + (" AND branch_id = ?" if branch_id else "")
+            + " ORDER BY id",
+            (branch_id,) if branch_id else (),
+        ).fetchall()
     return [json.loads(r["data"]) for r in rows]
 
 
 def messages_for(partner_id, limit=20):
+    """A partner's latest messages, newest first."""
     with connect() as conn:
         rows = conn.execute("SELECT * FROM messages WHERE to_partner = ? ORDER BY id DESC LIMIT ?",
                             (partner_id, limit)).fetchall()
@@ -610,20 +644,26 @@ def messages_for(partner_id, limit=20):
 
 
 def customer_messages(limit=50, branch_id=None):
+    """SMS texts sent to customers, newest first."""
     return _df("SELECT created_at, issue_id, to_customer, to_phone, text FROM messages WHERE channel = 'sms'"
                + (" AND branch_id = ?" if branch_id else "") + " ORDER BY id DESC LIMIT ?",
                ((branch_id,) if branch_id else ()) + (limit,))
 
 
 def events(limit=30, branch_id=None):
+    """The branch history timeline, newest first."""
     return _df("SELECT created_at, kind, text, issue_id FROM events" + (" WHERE branch_id = ?" if branch_id else "")
                + " ORDER BY id DESC LIMIT ?", ((branch_id,) if branch_id else ()) + (limit,))
 
 
 def audit_df(limit=200):
-    return _df("SELECT a.time, COALESCE(u.display_name, a.actor_user_id) AS actor, a.actor_user_id, a.action, "
-               "a.target, a.details_json, a.branch_id FROM audit_log a LEFT JOIN users u ON u.user_id = a.actor_user_id "
-               "ORDER BY a.id DESC LIMIT ?", (limit,))
+    """The audit log of sign-ins and admin actions, newest first."""
+    return _df(
+        "SELECT a.time, COALESCE(u.display_name, a.actor_user_id) AS actor, a.actor_user_id, a.action, "
+        "a.target, a.details_json, a.branch_id FROM audit_log a LEFT JOIN users u ON u.user_id = a.actor_user_id "
+        "ORDER BY a.id DESC LIMIT ?",
+        (limit,),
+    )
 
 
 def branch_summaries():
@@ -647,13 +687,16 @@ def branch_summaries():
 
 # ---------------------------------------------------------------- writes
 def add_issue(partner_id, text="", audio=None, quick_type=None, source="partner", branch_id=None, audio_path=None):
+    """Save a new report (text and/or voice note). Returns the issue id."""
     if audio and not audio_path:
         audio_path = str(save_voice(partner_id, audio))
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO issues(created_at, partner_id, source, quick_type, text, audio, audio_path, status, branch_id) "
+            "INSERT INTO issues(created_at, partner_id, source, quick_type, text, audio, audio_path, status, "
+            "branch_id) "
             "VALUES (?,?,?,?,?,?,?, 'new', ?)",
-            (now_stamp(), partner_id, source, quick_type, text, audio, audio_path, branch_id))
+            (now_stamp(), partner_id, source, quick_type, text, audio, audio_path, branch_id),
+        )
         _bump(conn)
         return cur.lastrowid
 
@@ -667,6 +710,7 @@ def save_voice(owner, audio):
 
 
 def get_draft(user_id, form):
+    """A user's unsent form draft, or None."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM drafts WHERE user_id = ? AND form = ?", (user_id, form)).fetchone()
     return dict(row) if row else None
@@ -683,11 +727,13 @@ def save_draft(user_id, form, tile=None, text="", transcript="", audio_path=None
 
 
 def clear_draft(user_id, form):
+    """Delete a user's draft once the form is sent."""
     with connect() as conn:
         conn.execute("DELETE FROM drafts WHERE user_id = ? AND form = ?", (user_id, form))
 
 
 def get_prefs(user_id):
+    """A user's saved preferences (filters, last page)."""
     with connect() as conn:
         rows = conn.execute("SELECT key, value FROM user_prefs WHERE user_id = ?", (user_id,)).fetchall()
     return {r["key"]: json.loads(r["value"]) for r in rows}
@@ -698,12 +744,15 @@ def set_prefs(user_id, values):
     if not values:
         return
     with connect() as conn:
-        conn.executemany("INSERT INTO user_prefs(user_id, key, value, updated_at) VALUES (?,?,?,?) "
-                         "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-                         [(user_id, k, json.dumps(v), now_iso()) for k, v in values.items()])
+        conn.executemany(
+            "INSERT INTO user_prefs(user_id, key, value, updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            [(user_id, k, json.dumps(v), now_iso()) for k, v in values.items()],
+        )
 
 
 def update_issue(issue_id, **fields):
+    """Update issue fields (JSON fields are encoded) and bump the data version."""
     if not fields:
         return
     values = [json.dumps(v, default=str) if k in JSON_FIELDS and v is not None else v for k, v in fields.items()]
@@ -727,6 +776,7 @@ def update_delivery(delivery_id, branch_id=None, **fields):
 
 
 def set_route(vehicle_id, road_ids, branch_id=None):
+    """Set a vehicle's route as an ordered list of road ids."""
     with connect() as conn:
         sql, params = "UPDATE vehicles SET route_roads = ? WHERE vehicle_id = ?", ["|".join(road_ids), vehicle_id]
         if branch_id:
@@ -738,12 +788,14 @@ def set_route(vehicle_id, road_ids, branch_id=None):
 
 
 def set_partner_status(partner_id, status):
+    """Set a partner's status (normal, delayed, break …)."""
     with connect() as conn:
         conn.execute("UPDATE partners SET status = ? WHERE partner_id = ?", (status, partner_id))
         _bump(conn)
 
 
 def add_disruption(issue_id, disruption, branch_id=None):
+    """Record a disruption that is now in force."""
     with connect() as conn:
         conn.execute("INSERT INTO disruptions(issue_id, data, created_at, branch_id) VALUES (?,?,?,?)",
                      (issue_id, json.dumps(disruption, default=str), now_stamp(), branch_id))
@@ -751,6 +803,7 @@ def add_disruption(issue_id, disruption, branch_id=None):
 
 
 def add_message(text, to_partner=None, to_customer=None, to_phone=None, channel="app", issue_id=None, branch_id=None):
+    """Queue a message to a partner (app) or a customer (SMS)."""
     with connect() as conn:
         conn.execute("INSERT INTO messages(created_at, issue_id, to_partner, to_customer, to_phone, channel, text, "
                      "branch_id) VALUES (?,?,?,?,?,?,?,?)",
@@ -759,12 +812,14 @@ def add_message(text, to_partner=None, to_customer=None, to_phone=None, channel=
 
 
 def mark_messages_read(partner_id):
+    """Mark all of a partner's messages as read."""
     with connect() as conn:
         conn.execute("UPDATE messages SET read = 1 WHERE to_partner = ? AND read = 0", (partner_id,))
         _bump(conn)
 
 
 def log_event(kind, text, issue_id=None, branch_id=None):
+    """Add a line to the branch history timeline."""
     with connect() as conn:
         conn.execute("INSERT INTO events(created_at, kind, text, issue_id, branch_id) VALUES (?,?,?,?,?)",
                      (now_stamp(), kind, text, issue_id, branch_id))

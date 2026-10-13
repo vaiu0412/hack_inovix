@@ -70,6 +70,10 @@ the partner app shows a simulated call.
 `GROQ_API_KEY` (free at console.groq.com) or `GEMINI_API_KEY`. Without a key, reports are understood by the
 built-in Tamil/English rules and voice uses free Google speech recognition.
 
+### Learning from decisions
+The API retrains the acceptance model once a day by itself. Without the API, run
+`python scripts/retrain_acceptance.py` nightly (cron) on the same `DB_PATH` – see [`LEARNING.md`](LEARNING.md).
+
 ## Checklist before going live
 - `DEMO_MODE` unset (no one-click demo chips).
 - Change the demo passwords: Super Admin → *Admins* resets Branch Admin passwords; with SMTP set up everyone can use

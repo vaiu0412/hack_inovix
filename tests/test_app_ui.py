@@ -314,3 +314,25 @@ def test_admin_compares_and_applies_the_optimised_plan(db):
     click(page, "Accept optimised plan")
     issue = store.get_issue(issue_id)
     assert issue["status"] == "accepted" and issue["plan"]["chosen"] == "optimised"
+
+
+def test_admin_skips_a_recommendation_and_insights_learns(db):
+    from modules import learning
+
+    seen = scope.preview_issue("DP102", "CBE-E", text="avinasi rd la accident, full block, rendu mani neram aagum")
+    issue_id = scope.report_issue("DP102", "CBE-E", seen["problem"], transcript=seen["transcript"])
+    east = auth.get_user("east.admin")
+    page = ok(_page_as(guards.BRANCH_PAGES["disruptions"], east))
+    first = store.get_issue(issue_id)["plan"]["actions"][0]["action_id"]
+    click(page, "Skip")
+    plan = store.get_issue(issue_id)["plan"]
+    assert plan["skipped"] == [first] and first not in [a["action_id"] for a in plan["actions"]]
+
+    page = ok(_page_as(guards.BRANCH_PAGES["insights"], east))
+    assert "Taken by action type" in text_of(page)
+    click(page, "Retrain now")                                     # 1 decision: explains what is missing
+    assert "Needs 20 decisions" in " ".join(w.value for w in page.warning)
+    learning.sample_history("CBE-E", n=40)
+    page = ok(_page_as(guards.BRANCH_PAGES["insights"], east))
+    click(page, "Retrain now")
+    assert learning.load_model()["rows"] == 41                     # 40 samples + the real skip

@@ -51,6 +51,7 @@ elif role == "branch_admin":
         st.Page(B["deliveries"], title="Deliveries", icon=":material/package_2:"),
         st.Page(B["disruptions"], title="Alerts", icon=":material/notifications_active:"),
         st.Page(B["history"], title="History", icon=":material/history:"),
+        st.Page(B["insights"], title="Insights", icon=":material/insights:"),
     ]
 else:
     pages = [

@@ -467,8 +467,9 @@ def modify_form(ctx, issue, where="top"):
                                 format_func=str.capitalize)
         minutes = c4.number_input("Minutes", 0, 600, int(problem.get("duration_min") or 0), step=15)
         if st.form_submit_button("Save and re-plan", type="primary", width="stretch"):
-            operations.edit_problem(issue["issue_id"], branch_id=ctx["branch_id"], type=dtype, road_id=road,
-                                    severity=severity, duration_min=int(minutes))
+            operations.edit_problem(issue["issue_id"], branch_id=ctx["branch_id"],
+                                    decided_by=st.session_state.get("display_name", "Branch admin"),
+                                    type=dtype, road_id=road, severity=severity, duration_min=int(minutes))
             st.rerun()
 
 
@@ -580,11 +581,30 @@ def alert_steps(ctx, issue):
             st.markdown(f"<p class='dp-sub' style='margin-bottom:8px'>{escape(plan['headline'])}</p>",
                         unsafe_allow_html=True)
         cols = st.columns(2, gap="small")
+        can_skip = issue["status"] == "analysed" and plan.get("kind") == "ripple"
         for i, action in enumerate(actions[:6]):
-            cols[i % 2].markdown(ui.rec_card(action), unsafe_allow_html=True)
+            with cols[i % 2]:
+                st.markdown(ui.rec_card(action), unsafe_allow_html=True)
+                if can_skip:
+                    seen, skip = st.columns([3, 1], vertical_alignment="center")
+                    if action.get("p_source", "none") != "none":
+                        seen.caption(f":material/thumb_up: Likely taken {action['p_accept']:.0%}")
+                    if skip.button("Skip", key=f"skip_{issue['issue_id']}_{i}", type="tertiary",
+                                   icon=":material/block:", help="Not this one – the plan is rebuilt without it"):
+                        operations.skip_action(issue["issue_id"], action["action_id"],
+                                               decided_by=st.session_state.get("display_name", "Branch admin"),
+                                               branch_id=ctx["branch_id"])
+                        st.rerun()
         if len(actions) > 6:
             with st.expander(f"All {len(actions)} actions"):
                 st.markdown("".join(ui.rec_card(a) for a in actions[6:]), unsafe_allow_html=True)
+        if plan.get("skipped"):
+            note, undo = st.columns([3, 1], vertical_alignment="center")
+            note.caption(f":material/block: {len(plan['skipped'])} skipped – the plan was rebuilt without them.")
+            if issue["status"] == "analysed" and undo.button("Undo skips", key=f"unskip_{issue['issue_id']}",
+                                                             type="tertiary", icon=":material/undo:"):
+                operations.restore_skipped(issue["issue_id"], ctx["branch_id"])
+                st.rerun()
         with st.expander("Messages to send", icon=":material/sms:"):
             for action in actions:
                 for message in action.get("messages", []):

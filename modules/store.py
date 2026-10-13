@@ -24,7 +24,7 @@ from modules import geometry
 from modules.data_loader import DATA_DIR, hhmm_to_min, load_all, load_branches, load_partners, nearest_place
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 ORDER_COLUMNS = {  # work assignment (v6): who created / assigned / handled an order, and when
     "created_by": "TEXT", "created_at": "TEXT", "assigned_at": "TEXT", "assigned_by": "TEXT", "accepted_at": "TEXT",
     "picked_at": "TEXT", "delivered_at": "TEXT", "package_size": "TEXT DEFAULT 'small'", "category": "TEXT",
@@ -92,14 +92,20 @@ CREATE TABLE IF NOT EXISTS escalations (
     id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_id TEXT NOT NULL, dp_id TEXT, level INTEGER, channel TEXT,
     time TEXT, result TEXT, details TEXT, branch_id TEXT);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by TEXT);
+CREATE TABLE IF NOT EXISTS decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, branch_id TEXT, issue_id INTEGER, decided_by TEXT,
+    decision TEXT, action_key TEXT, action_type TEXT, title TEXT, reason TEXT, features TEXT, p_accept REAL,
+    source TEXT DEFAULT 'app');
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, actor_user_id TEXT, action TEXT, target TEXT,
     details_json TEXT, branch_id TEXT);
 """
 TABLES = ["branches", "roles", "permissions", "role_permissions", "partners", "vehicles", "deliveries", "issues",
           "disruptions", "messages", "events", "meta", "users", "sessions", "otp_codes", "audit_log",
-          "login_attempts", "drafts", "user_prefs", "assignment_history", "escalations"]  # settings survive a reset
-BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events", "escalations"]
+          "login_attempts", "drafts", "user_prefs", "assignment_history", "escalations",
+          "decisions"]  # settings (incl. the learned acceptance model) survive a reset
+BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events", "escalations",
+                 "decisions"]
 ACTIVE_DONE = ("delivered", "failed")
 JSON_FIELDS = {"problem", "plan"}
 OPEN_ISSUE_STATUSES = ("new", "analysed")
@@ -266,6 +272,8 @@ def init_db():
             _migrate_v7(conn)
         if current < 8:
             _migrate_v8(conn)
+        if current < 9:
+            _set_version(conn, 9)  # decisions log: the table comes from SCHEMA
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:  # data but no accounts: add the demo ones
             _seed_users(conn)
             conn.execute("INSERT INTO audit_log(time, actor_user_id, action, target, details_json) VALUES (?,?,?,?,?)",
@@ -788,6 +796,22 @@ def set_setting(key, value, updated_by="system"):
                      "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, "
                      "updated_by = excluded.updated_by", (key, str(value), now_iso(), updated_by))
         _bump(conn)
+
+
+def add_decisions(rows):
+    """Log admin decisions on recommendations (one row per recommendation): accepted, skipped, rejected …"""
+    columns = ["time", "branch_id", "issue_id", "decided_by", "decision", "action_key", "action_type", "title",
+               "reason", "features", "p_accept", "source"]
+    with connect() as conn:
+        conn.executemany(f"INSERT INTO decisions({', '.join(columns)}) VALUES ({','.join('?' * len(columns))})",
+                         [tuple(r.get(c) for c in columns) for r in rows])
+        _bump(conn)
+
+
+def decisions_df(branch_id=None, limit=5000):
+    """The decision log, newest first (features as JSON text), optionally for one branch."""
+    return _df("SELECT * FROM decisions" + (" WHERE branch_id = ?" if branch_id else "") + " ORDER BY id DESC LIMIT ?",
+               ((branch_id,) if branch_id else ()) + (limit,))
 
 
 def escalations_df(delivery_id=None, branch_id=None, limit=200):

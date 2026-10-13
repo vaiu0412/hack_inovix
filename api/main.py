@@ -9,7 +9,8 @@ Roles: Super Admin   -> /branches (summaries), /demo/reset
        Branch Admin  -> /kpis, /partners, /deliveries, /map, /issues, /escalations – own branch only
        Delivery Partner -> /me… – own data only; dp_id and branch come from the session
 Calls: /twilio/voice and /twilio/gather are Twilio webhooks (signed requests only), see docs/AI_CALL.md.
-       A background task moves order offers along every 20 s (ESCALATION_SCHEDULER=off disables it).
+       A background task moves order offers along every 20 s (ESCALATION_SCHEDULER=off disables it);
+       another retrains the acceptance model once a day when new decisions came in (LEARNING_SCHEDULER=off).
 """
 import asyncio
 import json
@@ -20,7 +21,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from modules import auth, escalation, issues, operations, partner_scope, store
+from modules import auth, escalation, issues, learning, operations, partner_scope, store
 from modules.data_loader import load_all
 from modules.parser import setting
 from services import voice_call
@@ -41,15 +42,29 @@ async def _escalation_loop():
             log.exception("escalation tick failed")
 
 
+async def _learning_loop():
+    """Nightly retrain: checks every hour, trains when the model is a day old and new decisions came in."""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            result = await asyncio.to_thread(learning.maybe_retrain)
+            if result.get("trained"):
+                log.info("acceptance model retrained: %s", result)
+        except Exception:
+            log.exception("acceptance retrain failed")
+
+
 @asynccontextmanager
 async def lifespan(_app):
     """Create or upgrade the database when the API starts, and run the escalation timer."""
     store.init_db()
-    task = None
+    tasks = []
     if str(setting("ESCALATION_SCHEDULER", "on")).lower() != "off":
-        task = asyncio.create_task(_escalation_loop())
+        tasks.append(asyncio.create_task(_escalation_loop()))
+    if str(setting("LEARNING_SCHEDULER", "on")).lower() != "off":
+        tasks.append(asyncio.create_task(_learning_loop()))
     yield
-    if task:
+    for task in tasks:
         task.cancel()
 
 
@@ -379,6 +394,14 @@ def live_map(user=Depends(branch_admin_only)):
         "detour_roads": sorted({r for p in open_plans + accepted for r in p.get("via_roads", [])}),
         "at_risk": {r["delivery_id"]: r["risk_label"] for p in open_plans for r in p.get("risk", [])},
     }
+
+
+@app.get("/insights")
+def insights(user=Depends(branch_admin_only)):
+    """How the branch decides on recommendations: acceptance by action type, most changed, the model."""
+    data = learning.insights(user["branch_id"])
+    data["recent"] = [{k: r[k] for k in ("time", "decision", "action_type", "title", "reason")} for r in data["recent"]]
+    return _clean(data)
 
 
 @app.get("/escalations")

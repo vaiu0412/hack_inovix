@@ -5,16 +5,19 @@ analyse()  – impact + risk + recovery plan for a reported issue, explained the
 accept()   – apply the plan everywhere: deliveries, ETAs, routes, partner inboxes, customer SMS. The admin picks
              the rule-based plan or the OR-Tools optimised one (modules/optimizer.py), shown side by side.
 reject()   – close the issue and tell the reporter why.
+skip_action() – turn one recommendation down; the plan is rebuilt without it.
+Every decision on every recommendation is logged and learned from (modules/learning.py), and recommendations are
+ranked by how likely admins take them × how much they matter.
 """
 import json
 import re
 
-from modules import optimizer, store
+from modules import learning, optimizer, store
 from modules.data_loader import min_to_hhmm
 from modules.impact import NO_RIPPLE_TYPES, compute_impact
 from modules.issues import set_location, summarize, type_label
 from modules.parser import call_llm, llm_available
-from modules.recommender import recommend
+from modules.recommender import action_key, recommend
 from modules.risk import score_risk
 
 RISK_COLUMNS = ["delivery_id", "customer", "address_area", "priority", "vehicle_id", "road_id", "road_name",
@@ -51,7 +54,7 @@ def analyse(issue_id):
     elif problem["type"] in NO_RIPPLE_TYPES:
         plan = _single_stop_plan(problem, data)
     else:
-        plan = _ripple_plan(problem, data, branch)
+        plan = _ripple_plan(problem, data, branch, skip=(issue.get("plan") or {}).get("skipped") or [])
 
     plan["issue_id"] = issue_id
     plan["created_at"] = store.now_stamp()
@@ -61,12 +64,13 @@ def analyse(issue_id):
     return plan
 
 
-def _ripple_plan(problem, data, branch_id=None):
+def _ripple_plan(problem, data, branch_id=None, skip=()):
     disruption = to_disruption(problem)
     impact, summary = compute_impact(disruption, data)
     risk = score_risk(impact, disruption)
     # roads already blocked by earlier accepted issues must not be used for detours
-    actions, before_after, after = recommend(risk, [*store.active_disruptions(branch_id), disruption], data)
+    actions, before_after, after = recommend(risk, [*store.active_disruptions(branch_id), disruption], data,
+                                             skip=set(skip))
     counts = risk["risk_label"].value_counts().to_dict() if len(risk) else {}
     if len(risk):
         headline = (
@@ -85,6 +89,10 @@ def _ripple_plan(problem, data, branch_id=None):
         "via_roads": sorted({r for a in actions for r in a.get("via_roads", [])}),
     }
     plan["note"] = dispatcher_note(problem, plan, data)
+    for action in plan["actions"]:
+        action["action_id"] = action_key(action)
+    plan["skipped"] = sorted(skip)
+    plan["actions"] = learning.rank(plan["actions"], plan)  # what admins take × what matters most, first
     plan["optimised"] = _optimised(data, risk, [*store.active_disruptions(branch_id), disruption], branch_id, plan)
     return plan
 
@@ -99,6 +107,32 @@ def _optimised(data, risk, disruptions, branch_id, plan, thorough=False):
                                   time_limit_s=optimizer.TIME_LIMIT_S)
     except Exception as error:  # the rule-based plan is always there
         return {"available": optimizer.available(), "status": "failed", "note": str(error)[:200], "routes": {}}
+
+
+def skip_action(issue_id, key, decided_by="Manager", branch_id=None):
+    """The admin turns one recommendation down: log it (learned from) and rebuild the plan without it."""
+    issue = _issue_in_branch(issue_id, branch_id)
+    plan = issue.get("plan") or {}
+    if issue["status"] != "analysed" or plan.get("kind") != "ripple":
+        raise ValueError("Only an open alert's plan can be changed")
+    action = next((a for a in plan.get("actions") or [] if a.get("action_id") == key), None)
+    if action is None:
+        raise ValueError("This recommendation is no longer in the plan")
+    learning.record(issue, plan, "skipped", decided_by, actions=[action])
+    plan["skipped"] = sorted({*(plan.get("skipped") or []), key})
+    store.update_issue(issue_id, plan=plan)
+    store.log_event("decision", f"{decided_by} skipped “{action.get('title')}” on #{issue_id}", issue_id,
+                    branch_id=issue["branch_id"])
+    return analyse(issue_id)
+
+
+def restore_skipped(issue_id, branch_id=None):
+    """Bring back every skipped recommendation (the skips stay in the log)."""
+    issue = _issue_in_branch(issue_id, branch_id)
+    plan = issue.get("plan") or {}
+    plan["skipped"] = []
+    store.update_issue(issue_id, plan=plan)
+    return analyse(issue_id)
 
 
 def improve(issue_id, branch_id=None):
@@ -299,6 +333,11 @@ def accept(issue_id, decided_by="Manager", branch_id=None, choice="rules"):
         text = (f"{decided_by} accepted {which} for #{issue_id}: {changed['deliveries']} deliveries updated, "
                 f"{len(changed['partners_told'])} partners and {changed['customers_told']} customers notified")
         store.log_event("decision", text, issue_id, branch_id=branch)
+        learning.record(issue, plan, "accepted" if choice == "rules" else "replaced", decided_by)
+        if optimised.get("status") == "ok":
+            learning.record(issue, plan, "chosen" if choice == "optimised" else "not_chosen", decided_by,
+                            actions=[{"action_type": "optimised_plan", "target": f"issue {issue_id}",
+                                      "title": "Optimised plan (OR-Tools)"}])
     for other in store.list_issues(("analysed",), branch_id=branch):
         analyse(other["issue_id"])  # the branch changed, so its other plans must too
     return text
@@ -368,6 +407,8 @@ def _on_duty(partner):
 def reject(issue_id, reason="Not needed", decided_by="Manager", branch_id=None):
     """Reject a plan with a reason, close the issue and tell the reporter."""
     issue = _issue_in_branch(issue_id, branch_id)
+    if issue["status"] == "analysed":
+        learning.record(issue, issue.get("plan") or {}, "rejected", decided_by, reason=reason)
     store.update_issue(issue_id, status="rejected", decided_at=store.now_stamp(), decision_note=reason)
     if issue.get("partner_id"):
         store.add_message(f"Your report #{issue_id} was reviewed: {reason}. Continue as planned.",
@@ -375,9 +416,17 @@ def reject(issue_id, reason="Not needed", decided_by="Manager", branch_id=None):
     store.log_event("decision", f"{decided_by} rejected #{issue_id}: {reason}", issue_id, branch_id=issue["branch_id"])
 
 
-def edit_problem(issue_id, branch_id=None, **changes):
-    """Branch admin corrects what the AI understood (type, road, severity, duration), then re-plans."""
+def edit_problem(issue_id, branch_id=None, decided_by="Manager", **changes):
+    """Branch admin corrects what the AI understood (type, road, severity, duration), then re-plans.
+    The old plan's recommendations are logged as "modified"; earlier skips no longer apply."""
     issue = _issue_in_branch(issue_id, branch_id)
+    plan = issue.get("plan") or {}
+    if issue["status"] == "analysed" and plan.get("actions"):
+        what = ", ".join(f"{k} → {v}" for k, v in changes.items() if v is not None)
+        learning.record(issue, plan, "modified", decided_by, reason=what)
+    if plan:
+        plan["skipped"] = []
+        store.update_issue(issue_id, plan=plan)
     problem = dict(issue["problem"])
     if "road_id" in changes and changes["road_id"]:
         problem = set_location(problem, changes.pop("road_id"), store.snapshot(issue["branch_id"]))

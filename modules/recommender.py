@@ -114,11 +114,18 @@ def _customer_sms(row, eta, extra=""):
 
 
 # ---------------------------------------------------------------- main
-def recommend(impact, disruptions, data, polish=True):
+def action_key(action):
+    """Stable id of a recommendation, e.g. 'reroute|vehicle V2' – what the admin skips and the log learns from."""
+    return f"{action['action_type']}|{action['target']}"
+
+
+def recommend(impact, disruptions, data, polish=True, skip=()):
     """Return (actions, before_after, after_df).
 
     actions: list of dicts with action_type, target, description,
              expected_delay_saved_min, extra_km, deliveries_protected, why, messages
+    skip:    action keys the admin turned down; the plan is rebuilt without them (a skipped backup move falls back
+             to a reroute, a skipped reroute to prioritise / notify)
     before_after: predicted misses / delay / critical counts before vs after
     after_df: impact rows with new vehicle, ETA and risk after applying the plan
     """
@@ -159,6 +166,8 @@ def recommend(impact, disruptions, data, polish=True):
     urgent = after[((after["risk_label"] == "Critical") & after["priority"].isin(["medical", "perishable"]))
                    | (after["_broken"] & after["risk_label"].isin(["Critical", "High"]))]
     for idx, row in urgent.sort_values("deadline_min").iterrows():
+        if f"reassign|delivery {row['delivery_id']}" in skip:
+            continue
         source = vehicles.loc[row["original_vehicle"]]
         if backup is None:
             backup = nearest_backup(data, source["current_lat"], source["current_lng"])
@@ -238,6 +247,8 @@ def recommend(impact, disruptions, data, polish=True):
     #         with one detour per blocked road on its route
     pending = after[(after["action"] == "") & after["risk_label"].isin(["Critical", "High"]) & ~after["_broken"]]
     for vid in pending["original_vehicle"].unique():
+        if f"reroute|vehicle {vid}" in skip:
+            continue
         vehicle = vehicles.loc[vid]
         own = after[(after["original_vehicle"] == vid) & (after["action"] == "")]
         protected = own[own["risk_label"].isin(["Critical", "High"])]
@@ -316,6 +327,8 @@ def recommend(impact, disruptions, data, polish=True):
     medium = after[(after["action"] == "") & (after["risk_label"] != "Low")
                    | ((after["action"] == "rerouted") & (after["label_before"] == "Medium"))]
     for idx, row in medium.iterrows():
+        if f"resequence|delivery {row['delivery_id']}" in skip:
+            continue
         if row["action"] == "rerouted":
             saved, new_eta = 0, int(row["new_eta_min"])
             slack = int(row["deadline_min"] - new_eta)
@@ -349,6 +362,8 @@ def recommend(impact, disruptions, data, polish=True):
     # ---- 4. Low -> reschedule + notify
     low = after[(after["action"] == "") | ((after["action"] == "rerouted") & (after["label_before"] == "Low"))]
     for idx, row in low.iterrows():
+        if f"reschedule_notify|delivery {row['delivery_id']}" in skip:
+            continue
         eta = int(row["new_eta_min"])
         why = (f"{row['customer']} is low risk ({row['slack_min']} min slack, {row['priority']}); "
                f"a heads-up message is enough, no vehicle change needed.")

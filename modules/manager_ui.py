@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-from modules import admin, assign, guards, issues, live_map, operations, predict, store, ui
+from modules import admin, assign, guards, issues, live_map, operations, predict, store, tracking, ui
 from modules.data_loader import load_all
 from modules.graph_viz import build_graph, render_graph
 from modules.parser import SEVERITIES, llm_status
@@ -111,15 +111,24 @@ def at_risk_rows(ctx, limit=5):
 
 
 def likely_late_card(ctx, limit=5):
-    """Proactive list from the delay model – before anyone reports a problem – with today's weather switch."""
+    """Proactive list from the delay model – before anyone reports a problem – with today's weather switch
+    (or the live OpenWeatherMap reading when a key is set)."""
+    from modules import realtime
+    from services import weather as weather_feed
+
     weather = predict.weather_now()
-    pick = st.segmented_control("Weather", list(predict.WEATHER), default=weather, key="weather_pick",
-                                format_func=lambda w: {"clear": "☀️ Clear", "light_rain": "🌦️ Light rain",
-                                                       "heavy_rain": "⛈️ Heavy rain"}[w],
-                                label_visibility="collapsed")
-    if pick and pick != weather:
-        predict.set_weather(ctx["actor"], pick)
-        st.rerun()
+    live = realtime.weather_status() if weather_feed.configured() else None
+    if live:
+        st.caption(f":material/rainy: Live: {predict.WEATHER_LABEL[live['weather']]} · {live['rain_mm']} mm/h · "
+                   f"OpenWeatherMap {live['updated_at'][11:16]}")
+    else:
+        pick = st.segmented_control("Weather", list(predict.WEATHER), default=weather, key="weather_pick",
+                                    format_func=lambda w: {"clear": "☀️ Clear", "light_rain": "🌦️ Light rain",
+                                                           "heavy_rain": "⛈️ Heavy rain"}[w],
+                                    label_visibility="collapsed")
+        if pick and pick != weather:
+            predict.set_weather(ctx["actor"], pick)
+            st.rerun()
     preds = predict.for_branch(ctx["branch_id"])
     deliveries = store.deliveries_df(branch_id=ctx["branch_id"]).set_index("delivery_id")
     drivers = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
@@ -135,7 +144,8 @@ def likely_late_card(ctx, limit=5):
                     f"{d['deadline']} · +{max(p['delay_min'], 0):.0f} min</small><small>{ui.late_badge(p)}</small>"
                     f"</div></div>")
     st.markdown("".join(rows) or "<p class='dp-small'>No open stops.</p>", unsafe_allow_html=True)
-    st.caption(f":material/model_training: {predict.summary_line()} · weather is a demo setting")
+    st.caption(f":material/model_training: {predict.summary_line()}"
+               + ("" if live else " · weather is a demo setting"))
 
 
 def ai_status_line():
@@ -222,7 +232,7 @@ def live_map_view(ctx, height=620, key="live_map", filters=True):
     holder.markdown(ui.skeleton(height), unsafe_allow_html=True)
     fmap = live_map.build(view, deliveries, ctx["roads"], disruptions, detours, risk,
                           selected=st.session_state.get("selected_partner"), states=states,
-                          focus=True if focus else None)
+                          focus=True if focus else None, trails=tracking.trails(ctx["branch_id"]))
     with holder.container():
         out = st_folium(fmap, height=height, use_container_width=True, key=key,
                         returned_objects=["last_object_clicked_tooltip"])
@@ -266,7 +276,8 @@ def partner_panel(ctx, pid):
                     + f"<div style='margin-top:10px'>{ui.pill_html(state)}</div>", unsafe_allow_html=True)
         st.markdown(ui.kv([
             ("Vehicle", f"{escape(p['vehicle_id'])} · {escape(p['reg_no'])}"),
-            ("Location", escape(p["area"])),
+            ("Location", f"{escape(p['area'])}<br><small>"
+                         f"{escape(tracking.seen_text(tracking.last_seen(ctx['branch_id']).get(pid)))}</small>"),
             ("Deliveries", f"{p['delivered']} done · {p['pending']} left"),
             ("Next ETA", escape(str(p["next_eta"]))),
             ("Route", escape(route or "—")),

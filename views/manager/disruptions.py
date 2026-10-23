@@ -1,7 +1,7 @@
 """Alerts: what changed, what is affected, what to do – then one tap to apply the plan."""
 import streamlit as st
 
-from modules import guards, store, ui
+from modules import guards, live_ui, store, ui
 from modules import manager_ui as mui
 
 guards.require_role("branch_admin")
@@ -16,6 +16,8 @@ if issue and issue["status"] == "accepted":
     if st.button("Hide", type="tertiary", key="hide_applied"):
         st.session_state.pop("last_applied", None)
         st.rerun()
+
+live_ui.suggestion_cards(ctx)  # traffic jams from the live feed: confirm -> a new alert below
 
 if not open_issues:
     with ui.card("no_alerts"):

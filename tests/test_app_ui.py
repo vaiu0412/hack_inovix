@@ -336,3 +336,21 @@ def test_admin_skips_a_recommendation_and_insights_learns(db):
     page = ok(_page_as(guards.BRANCH_PAGES["insights"], east))
     click(page, "Retrain now")
     assert learning.load_model()["rows"] == 41                     # 40 samples + the real skip
+
+
+def test_live_feeds_card_demo_traffic_check_and_create_alert(db):
+    east = auth.get_user("east.admin")
+    page = ok(_page_as(guards.BRANCH_PAGES["command"], east))
+    assert "Live feeds" in text_of(page) and "set by hand (Demo mode)" in text_of(page)
+    click(page, "Check traffic (demo)")
+    page = ok(_page_as(guards.BRANCH_PAGES["command"], east))
+    assert "traffic on Trichy Road" in text_of(page)
+    click(page, "Create alert")
+    [issue] = store.list_issues(branch_id="CBE-E")
+    assert issue["source"] == "auto-traffic" and issue["status"] == "analysed"
+
+
+def test_partner_app_renders_with_location_sharing(db):
+    at = sign_in("DP102", "Partner@123")
+    captions = " ".join(c.value for c in at.sidebar.caption)
+    assert "Location" in captions                                   # waiting for the browser (no JS in tests)

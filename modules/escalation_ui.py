@@ -33,7 +33,11 @@ def watcher(user):
     if role == "branch_admin":
         @st.fragment(run_every="20s")
         def _admin_timer():
-            if escalation.tick(branch_id=user["branch_id"]):
+            from modules import realtime  # weather / traffic / simulated movement, each at its own pace
+
+            changed = escalation.tick(branch_id=user["branch_id"])
+            realtime.poll(user["branch_id"])
+            if changed:
                 st.rerun(scope="app")
 
         with st.sidebar:

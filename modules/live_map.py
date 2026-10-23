@@ -160,14 +160,15 @@ def add_tiles(m, switcher=True):
 
 
 def build(partners, deliveries, roads, disruptions=(), detour_roads=(), risk_labels=None, selected=None,
-          states=None, focus=None, zoom=13):
+          states=None, focus=None, zoom=13, trails=None):
     """folium.Map for one branch (or one partner).
 
     partners: DataFrame (partner_id, name, status, vehicle_type, vehicle_id, lat, lng, route_roads)
     states: {partner_id: 'normal'|'delayed'|'critical'|'available'|'break'|'off'}
     focus: list of (lat, lng) to zoom to (e.g. the alerts), else everything is fitted
+    trails: {vehicle_id: [[lat, lng], ...]} – live GPS / simulated positions; such a vehicle is drawn where it is
     """
-    risk_labels, states = risk_labels or {}, states or {}
+    risk_labels, states, trails = risk_labels or {}, states or {}, trails or {}
     shapes = store.route_geometry()
     m = folium.Map(location=COIMBATORE_CENTER, zoom_start=zoom, tiles=None, control_scale=True, scrollWheelZoom=False)
     add_tiles(m)
@@ -251,8 +252,12 @@ def build(partners, deliveries, roads, disruptions=(), detour_roads=(), risk_lab
     for p in records:
         state = states.get(p["partner_id"], "normal")
         ring = STATE.get(state, STATE["off"])[1]
+        trail = trails.get(p["vehicle_id"]) or []
+        if len(trail) > 1:  # where the vehicle really went (last 30 min)
+            folium.PolyLine(trail, color=ring, weight=3, opacity=0.75, dash_array="2 7",
+                            tooltip=f"{p['name']} · last 30 min").add_to(m)
         snapped = shapes.get(f"snap:{p['vehicle_id']}")
-        position = tuple(snapped[0]) if snapped else (p["lat"], p["lng"])
+        position = (p["lat"], p["lng"]) if trail or not snapped else tuple(snapped[0])
         css = "dp-veh" + (" pulse" if state == "critical" else "") + (
             " sel" if p["partner_id"] == selected else " fade" if selected else "")
         folium.Marker(position, z_index_offset=1000 if p["partner_id"] == selected else 500,

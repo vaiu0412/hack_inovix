@@ -1,7 +1,7 @@
 """Command Center: the open alert, today's numbers, the map and what is at risk now."""
 import streamlit as st
 
-from modules import escalation_ui, guards, ui
+from modules import escalation_ui, guards, live_ui, ui
 from modules import manager_ui as mui
 
 guards.require_role("branch_admin")
@@ -10,6 +10,7 @@ ctx = mui.context()
 
 mui.alert_banner(ctx)
 escalation_ui.admin_alerts(ctx)
+live_ui.suggestion_cards(ctx)  # traffic jams the feed found: confirm -> alert
 mui.kpi_tiles(ctx)
 
 map_col, side_col = st.columns([1.6, 1], gap="medium")
@@ -29,6 +30,9 @@ with side_col:
     ui.section("Likely late", "model_training")
     with ui.card("likely_late"):
         mui.likely_late_card(ctx)
+    ui.section("Live feeds", "sensors")
+    with ui.card("live_feeds"):
+        live_ui.feeds_card(ctx)
     ui.section("Latest", "history")
     with ui.card("latest"):
         mui.activity_feed(ctx, limit=5)

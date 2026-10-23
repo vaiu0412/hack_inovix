@@ -10,7 +10,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from modules import escalation_ui, guards, ui
+from modules import escalation_ui, guards, live_ui, ui
 from modules.guards import BRANCH_PAGES as B
 from modules.guards import PARTNER_PAGES as P
 from modules.guards import SUPER_PAGES as S
@@ -76,6 +76,7 @@ escalation_ui.watcher(user)  # order offers: ring / call / alert timer (+ the pa
 if "_welcome" in st.session_state:
     st.toast(st.session_state.pop("_welcome"))
 if role == "partner":
+    live_ui.share_location(user)  # GPS every 30 s while on duty
     escalation_ui.partner_overlay(user)  # full-screen card while an urgent order waits for Accept
 navigation.run()
 ui.mark_seen()  # this session's own writes don't trigger a refresh (one-time messages and passwords stay visible)

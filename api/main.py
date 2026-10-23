@@ -10,7 +10,8 @@ Roles: Super Admin   -> /branches (summaries), /demo/reset
        Delivery Partner -> /me… – own data only; dp_id and branch come from the session
 Calls: /twilio/voice and /twilio/gather are Twilio webhooks (signed requests only), see docs/AI_CALL.md.
        A background task moves order offers along every 20 s (ESCALATION_SCHEDULER=off disables it);
-       another retrains the acceptance model once a day when new decisions came in (LEARNING_SCHEDULER=off).
+       another retrains the acceptance model once a day when new decisions came in (LEARNING_SCHEDULER=off);
+       another runs the live feeds every minute – weather, traffic, simulated movement (FEEDS_SCHEDULER=off).
 """
 import asyncio
 import json
@@ -21,7 +22,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from modules import auth, escalation, issues, learning, operations, partner_scope, store
+from modules import auth, escalation, issues, learning, operations, partner_scope, realtime, store, tracking
 from modules.data_loader import load_all
 from modules.parser import setting
 from services import voice_call
@@ -54,6 +55,18 @@ async def _learning_loop():
             log.exception("acceptance retrain failed")
 
 
+async def _feeds_loop():
+    """Weather (10 min), traffic (10 min, with a key) and simulated movement, even when no page is open."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            done = await asyncio.to_thread(realtime.poll)
+            if done:
+                log.info("live feeds: %s", list(done))
+        except Exception:
+            log.exception("live feeds failed")
+
+
 @asynccontextmanager
 async def lifespan(_app):
     """Create or upgrade the database when the API starts, and run the escalation timer."""
@@ -63,6 +76,8 @@ async def lifespan(_app):
         tasks.append(asyncio.create_task(_escalation_loop()))
     if str(setting("LEARNING_SCHEDULER", "on")).lower() != "off":
         tasks.append(asyncio.create_task(_learning_loop()))
+    if str(setting("FEEDS_SCHEDULER", "on")).lower() != "off":
+        tasks.append(asyncio.create_task(_feeds_loop()))
     yield
     for task in tasks:
         task.cancel()
@@ -143,6 +158,14 @@ class DeclineIn(BaseModel):
     """Why the partner can't take an order."""
 
     reason: str = "Other"
+
+
+class LocationIn(BaseModel):
+    """A position from the partner's phone (GPS)."""
+
+    lat: float
+    lng: float
+    accuracy_m: float | None = None
 
 
 class Decision(BaseModel):
@@ -267,6 +290,13 @@ def deliver(delivery_id: str, user=Depends(partner_only)):
     except ValueError as error:  # e.g. not picked up yet – steps can't be skipped
         raise HTTPException(409, str(error)) from error
     return {"ok": True, "changed": changed}
+
+
+@app.post("/me/location")
+def my_location(body: LocationIn, user=Depends(partner_only)):
+    """The partner's phone reports its position (every 30 s while on duty). Ignored outside Coimbatore."""
+    used = tracking.record(user["dp_id"], user["branch_id"], body.lat, body.lng, body.accuracy_m)
+    return {"ok": True, "used": used}
 
 
 @app.get("/me/offers")

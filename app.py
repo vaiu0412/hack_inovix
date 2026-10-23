@@ -10,12 +10,15 @@ from pathlib import Path
 
 import streamlit as st
 
-from modules import escalation_ui, guards, live_ui, ui
+from modules import escalation_ui, guards, i18n, live_ui, track_ui, ui
 from modules.guards import BRANCH_PAGES as B
 from modules.guards import PARTNER_PAGES as P
 from modules.guards import SUPER_PAGES as S
 
 ui.setup_store()
+if track_ui.requested():  # a customer's tracking link: public, no sign-in, nothing else of the app
+    track_ui.run()
+    st.stop()
 user = guards.restore()
 role = user["role"] if user else None
 ui.setup_page(layout="centered" if role == "partner" else "wide", role=role)
@@ -52,14 +55,16 @@ elif role == "branch_admin":
         st.Page(B["disruptions"], title="Alerts", icon=":material/notifications_active:"),
         st.Page(B["history"], title="History", icon=":material/history:"),
         st.Page(B["insights"], title="Insights", icon=":material/insights:"),
+        st.Page(B["analytics"], title="Analytics", icon=":material/analytics:"),
     ]
 else:
+    i18n.load(user)  # Tamil or English, as the partner chose last time
     pages = [
-        st.Page(P["today"], title="Today", icon=":material/today:", default=True),
-        st.Page(P["deliveries"], title="Deliveries", icon=":material/package_2:"),
-        st.Page(P["route"], title="Route", icon=":material/route:"),
-        st.Page(P["report"], title="Report", icon=":material/campaign:"),
-        st.Page(P["history"], title="History", icon=":material/history:"),
+        st.Page(P["today"], title=i18n.t("nav_today"), icon=":material/today:", default=True),
+        st.Page(P["deliveries"], title=i18n.t("nav_deliveries"), icon=":material/package_2:"),
+        st.Page(P["route"], title=i18n.t("nav_route"), icon=":material/route:"),
+        st.Page(P["report"], title=i18n.t("nav_report"), icon=":material/campaign:"),
+        st.Page(P["history"], title=i18n.t("nav_history"), icon=":material/history:"),
     ]
 
 navigation = st.navigation(pages)

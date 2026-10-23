@@ -3,6 +3,7 @@
 - regressor:  minutes late vs plan (objective: regression)            -> models/delay_regressor.json
 - classifier: misses the deadline yes/no (objective: binary, +slack)  -> models/late_classifier.json
 - metadata:   data, split, parameters, metrics, feature importance     -> models/delay_model.meta.json
+- summary:    delays by road/hour, SLA per day, test accuracy          -> models/history_summary.json
 
 Train/test split by date: the last 12 days are the test set; the 7 days before them are used for early stopping.
 Metrics: MAE (minutes) for the regressor, ROC-AUC for the classifier – each next to a simple baseline.
@@ -24,6 +25,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from ml import summarise_history  # noqa: E402
 from ml.generate_history import OUT as HISTORY  # noqa: E402
 from modules import predict  # noqa: E402
 
@@ -186,6 +188,7 @@ def main():
     print("mean |SHAP|, regressor:", meta["mean_abs_shap"]["regressor"])
     print("mean |SHAP|, classifier:", meta["mean_abs_shap"]["classifier"])
     print(f"export matches LightGBM (max diff {max(parity.values()):.2e}); saved to {predict.MODEL_DIR.name}/")
+    summarise_history.main()  # the Analytics page's history summary, scored with the models just saved
     return meta
 
 

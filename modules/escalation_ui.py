@@ -8,6 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from modules import assign, escalation, ui
+from modules.i18n import t
 
 ALARM = Path(__file__).resolve().parent.parent / "assets" / "alert.wav"  # 15 s loop: beeps every 15 s
 
@@ -16,7 +17,7 @@ def offer_pill(status):
     """Coloured chip for an offer status: Sent, Seen, Ringing, Calling, Accepted, Declined, No response."""
     if not status:
         return ""
-    return ui.pill_html(escalation.STATE.get(status, "off"), escalation.LABEL.get(status, status))
+    return ui.pill_html(escalation.STATE.get(status, "off"), t(f"offer_{status}"))
 
 
 def offer_text(status):
@@ -58,7 +59,7 @@ def watcher(user):
 
 
 def _alarm(count):
-    st.caption(f":material/notifications_active: {count} order{'s' if count > 1 else ''} waiting")
+    st.caption(f":material/notifications_active: {t('orders_waiting', n=count)}")
     st.audio(str(ALARM), format="audio/wav", autoplay=True, loop=True)
     # a new snippet every run, so the phone vibrates again every 15 s (Android; iPhones can't vibrate from a page)
     components.html(f"<script>/* {time.time()} */ try {{ const n = window.parent.navigator; "
@@ -82,33 +83,34 @@ def partner_overlay(user):
     with st.container(key="offer_overlay"):
         if calling:
             st.markdown(f"<div class='dp-offer'><div class='ring'>{ui.icon('call', 40)}</div>"
-                        "<p class='kicker'>DEPORT IS CALLING · DEMO MODE</p>"
+                        f"<p class='kicker'>{t('calling_demo')}</p>"
                         f"<p class='say'>“{escape(escalation.call_message(offer))}”</p></div>",
                         unsafe_allow_html=True)
         else:
-            more = f" · +{len(urgent) - 1} more" if len(urgent) > 1 else ""
+            more = f" · {t('more', n=len(urgent) - 1)}" if len(urgent) > 1 else ""
             st.markdown(
                 f"<div class='dp-offer'><div class='ring'>{ui.icon('emergency', 40)}</div>"
-                f"<p class='kicker'>NEW URGENT ORDER{more}</p>"
+                f"<p class='kicker'>{t('urgent_order')}{more}</p>"
                 f"<p class='title'>{escape(did)} · {escape(str(offer.get('category') or 'Parcel'))}</p>"
                 f"<p class='who'>{escape(offer['customer'])}</p>"
-                f"<p class='where'>{escape(offer['address_area'])} · due {escape(offer['deadline'])} · "
-                f"{escape(str(offer.get('priority') or '').capitalize())}</p>"
+                f"<p class='where'>{escape(offer['address_area'])} · {t('due_at', time=escape(offer['deadline']))} · "
+                f"{escape(t('priority_' + str(offer.get('priority') or 'standard')))}</p>"
                 f"<div class='chip'>{offer_pill(offer['offer_status'])}</div></div>",
                 unsafe_allow_html=True)
         _answer_buttons(dp_id, branch, offer, channel="call" if calling else "app",
-                        labels=("1 · Accept", "2 · Can't take") if calling else ("Accept", "Can't take"))
+                        labels=(t("key_accept"), t("key_cant")) if calling else (t("accept"), t("cant_take")))
 
 
 def _answer_buttons(dp_id, branch, offer, channel, labels):
     did = offer["delivery_id"]
     if st.session_state.get(f"decline_{did}"):
-        reason = st.pills("Why?", escalation.DECLINE_REASONS, key=f"decline_reason_{did}")
+        reason = st.pills(t("why"), escalation.DECLINE_REASONS, key=f"decline_reason_{did}",
+                          format_func=lambda r: t(f"reason_{r}"))
         send, back = st.columns(2)
-        if send.button("Send", type="primary", icon=":material/send:", width="stretch", key=f"decline_send_{did}",
+        if send.button(t("send"), type="primary", icon=":material/send:", width="stretch", key=f"decline_send_{did}",
                        disabled=not reason):
             _answer(dp_id, branch, did, False, reason, channel)
-        if back.button("Back", width="stretch", key=f"decline_back_{did}"):
+        if back.button(t("back"), width="stretch", key=f"decline_back_{did}"):
             st.session_state.pop(f"decline_{did}", None)
             st.rerun()
         return
@@ -122,7 +124,7 @@ def _answer_buttons(dp_id, branch, offer, channel, labels):
 def _answer(dp_id, branch, delivery_id, accept, reason, channel):
     try:
         escalation.respond(dp_id, branch, delivery_id, accept, reason=reason, channel=channel)
-        st.toast(f"{delivery_id} is yours." if accept else "Sent. Your admin will reassign it.",
+        st.toast(t("is_yours", id=delivery_id) if accept else t("sent_reassign"),
                  icon=":material/check:" if accept else ":material/send:")
     except (ValueError, PermissionError) as error:
         st.toast(str(error), icon=":material/error:")
@@ -132,9 +134,10 @@ def _answer(dp_id, branch, delivery_id, accept, reason, channel):
 
 def cant_take(dp_id, branch, delivery, key):
     """'Can't take' with a reason, for an offered order on the partner's lists."""
-    with st.popover("Can't take", icon=":material/block:", width="stretch"):
-        reason = st.pills("Why?", escalation.DECLINE_REASONS, key=f"why_{key}")
-        if st.button("Send", type="primary", width="stretch", key=f"cant_send_{key}", disabled=not reason):
+    with st.popover(t("cant_take"), icon=":material/block:", width="stretch"):
+        reason = st.pills(t("why"), escalation.DECLINE_REASONS, key=f"why_{key}",
+                          format_func=lambda r: t(f"reason_{r}"))
+        if st.button(t("send"), type="primary", width="stretch", key=f"cant_send_{key}", disabled=not reason):
             _answer(dp_id, branch, delivery["delivery_id"], False, reason, "app")
 
 

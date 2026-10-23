@@ -8,12 +8,13 @@ from streamlit_folium import st_folium
 from modules import guards, live_map, ui
 from modules import partner_scope as scope
 from modules.data_loader import load_all
+from modules.i18n import t
 
 guards.require_role("partner")
 dp_id = guards.dp_id()
 branch = guards.branch_id()  # from the validated session only
 profile = scope.get_partner_profile(dp_id, branch)
-ui.header("Route", f"{profile['pending']} stops left")
+ui.header(t("route_title"), t("stops_left", n=profile["pending"]))
 
 deliveries = scope.get_partner_deliveries(dp_id, branch)
 route = scope.get_partner_route(dp_id, branch)
@@ -40,22 +41,22 @@ with holder.container():
     st_folium(fmap, height=420, use_container_width=True, key="my_route_map", returned_objects=[])
 
 if blocked:
-    st.error(f"Blocked: {', '.join(b['road_name'] for b in blocked)}. Check Today.", icon=":material/block:")
+    st.error(t("blocked_check", roads=", ".join(b["road_name"] for b in blocked)), icon=":material/block:")
 
 todo = deliveries[~deliveries["status"].isin(["delivered", "failed"])].sort_values("eta_min")
-ui.section("Stops", "pin_drop")
+ui.section(t("stops"), "pin_drop")
 with ui.card("route_stops"):
     if todo.empty:
-        ui.empty_state("task_alt", "All stops done.")
+        ui.empty_state("task_alt", t("all_stops_done"))
     rows = []
     for d in todo.to_dict("records"):
         slack = d["deadline_min"] - d["eta_min"]
         timing = (
-            ui.pill_html("normal", f"{slack} min early")
+            ui.pill_html("normal", t("min_early", n=slack))
             if slack >= 0
-            else ui.pill_html("critical", f"{-slack} min late")
+            else ui.pill_html("critical", t("min_late", n=-slack))
         )
         rows.append(f"<div class='dp-row'><div class='main'><b>{d['stop_order']}. {escape(d['customer'])}</b>"
-                    f"<small>{escape(d['address_area'])} · due {d['deadline']}</small></div>"
+                    f"<small>{escape(d['address_area'])} · {t('due_at', time=d['deadline'])}</small></div>"
                     f"<div class='end'>{d['planned_eta']}<br>{timing}</div></div>")
     st.markdown("".join(rows), unsafe_allow_html=True)

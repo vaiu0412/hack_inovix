@@ -227,8 +227,8 @@ def skeleton(height=160, count=1):
     return block * count
 
 
-def progress_ring(done, total, size=84):
-    """SVG ring showing done/total."""
+def progress_ring(done, total, size=84, of_text=None, word="delivered"):
+    """SVG ring showing done/total (of_text / word let the partner app say it in Tamil)."""
     share = done / total if total else 0
     r, c = 34, 2 * 3.14159 * 34
     return (f'<div class="dp-ring"><svg width="{size}" height="{size}" viewBox="0 0 84 84" role="img" '
@@ -237,8 +237,8 @@ def progress_ring(done, total, size=84):
             + (f'<circle cx="42" cy="42" r="{r}" fill="none" stroke="#22C55E" stroke-width="9" stroke-linecap="round" '
                f'stroke-dasharray="{c * share:.1f} {c:.1f}" transform="rotate(-90 42 42)"/>' if done else "")
             + f'<text x="42" y="47" text-anchor="middle" font-size="17" font-weight="750" '
-            f'fill="var(--dp-text)">{done}/{total}</text></svg><div><div class="n">{done} of {total}</div>'
-            f'<div class="dp-small">delivered</div></div></div>')
+            f'fill="var(--dp-text)">{done}/{total}</text></svg><div><div class="n">{of_text or f"{done} of {total}"}'
+            f'</div><div class="dp-small">{escape(word)}</div></div></div>')
 
 
 def before_after(rows):
@@ -260,7 +260,7 @@ def rec_card(action):
 
 # ---------------------------------------------------------------- saved preferences (filters, last page)
 PREF_KEYS = ("live_map_status", "live_map_kind", "live_map_road", "live_map_focus", "team_status", "team_kind",
-             "team_alerts", "del_state", "del_priority", "del_partner", "del_not_accepted")
+             "team_alerts", "del_state", "del_priority", "del_partner", "del_not_accepted", "lang")
 
 
 def sync_prefs(user, page):
@@ -361,7 +361,13 @@ def sidebar_user():
                     + f'<div style="margin:10px 0 2px">{badge(label, css)}</div>'
                     + (f'<small style="color:var(--dp-muted)">{escape(user["branch_name"])}</small>'
                        if user.get("branch_name") else ""), unsafe_allow_html=True)
-        if st.button("Sign out", icon=":material/logout:", width="stretch", key="logout"):
+        if user["role"] == "partner":
+            from modules import i18n
+
+            i18n.picker()  # English / தமிழ், saved with the partner's preferences
+        from modules.i18n import t
+
+        if st.button(t("sign_out"), icon=":material/logout:", width="stretch", key="logout"):
             guards.logout()
         if user["role"] == "super_admin" and st.button("Reset demo data", icon=":material/restart_alt:",
                                                         width="stretch", key="reset_demo_open"):

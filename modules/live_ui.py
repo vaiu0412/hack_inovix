@@ -7,6 +7,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from modules import predict, realtime, store, tracking, ui
+from modules.i18n import t
 
 _geolocation = components.declare_component(
     "deport_geolocation", path=str(Path(__file__).resolve().parent.parent / "components" / "geolocation"))
@@ -21,23 +22,23 @@ def share_location(user):
     def _gps():
         partner = store.get_partner(dp_id, branch) or {}
         if partner.get("status") != "on_duty":
-            st.caption(":material/location_off: Location off (not on duty)")
+            st.caption(f":material/location_off: {t('loc_off')}")
             return
         value = _geolocation(interval_s=tracking.GPS_EVERY_S, key="gps", default=None)
         if not value:
-            st.caption(":material/my_location: Location: waiting for the browser…")
+            st.caption(f":material/my_location: {t('loc_waiting')}")
             return
         if value.get("error"):
-            st.caption(":material/location_off: Location blocked – allow it in the browser to share it.")
+            st.caption(f":material/location_off: {t('loc_blocked')}")
             return
         if value.get("ts") != st.session_state.get("_gps_ts"):
             st.session_state["_gps_ts"] = value.get("ts")
             st.session_state["_gps_ok"] = tracking.record(dp_id, branch, value["lat"], value["lng"],
                                                           value.get("accuracy"))
         if st.session_state.get("_gps_ok", True):
-            st.caption(f":material/my_location: Sharing location every {tracking.GPS_EVERY_S} s (on duty)")
+            st.caption(f":material/my_location: {t('loc_sharing', n=tracking.GPS_EVERY_S)}")
         else:
-            st.caption(":material/location_off: You are outside Coimbatore – position not used.")
+            st.caption(f":material/location_off: {t('loc_outside')}")
 
     with st.sidebar:
         _gps()

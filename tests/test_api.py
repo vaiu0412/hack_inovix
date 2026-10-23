@@ -106,3 +106,18 @@ def test_reset_is_super_admin_only(client, east):
     assert client.post("/demo/reset", headers=east).status_code == 403
     boss = token(client, "superadmin@deport.in", "Super@123", super_console=True)
     assert client.post("/demo/reset", headers=boss).json()["ok"]
+
+
+def test_proof_of_delivery(client, karthik):
+    murugan = token(client, "DP101", "Partner@123")
+    assert client.post("/me/deliveries/D06/delivered", headers=murugan).status_code == 409   # medical: proof first
+    assert client.post("/me/deliveries/D06/pod/code", headers=karthik).status_code == 403   # not his order
+    sent = client.post("/me/deliveries/D06/pod/code", headers=murugan).json()
+    assert sent["status"] == "draft" and len(sent["demo_code"]) == 4                        # Demo mode
+    photo = ("door.png", b"\x89PNG\r\n\x1a\n" + bytes(32), "image/png")
+    assert client.post("/me/deliveries/D06/pod", headers=murugan, files={"photo": photo}).status_code == 409
+    reply = client.post("/me/deliveries/D06/pod", headers=murugan, files={"photo": photo},
+                        data={"code": sent["demo_code"], "note": "At reception"})
+    assert reply.status_code == 200 and reply.json() == {"ok": True, "delivered": "D06"}
+    assert client.post("/me/deliveries/D06/pod", headers=murugan, files={"photo": photo},
+                       data={"code": sent["demo_code"]}).status_code == 409                  # already delivered

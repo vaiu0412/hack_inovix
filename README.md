@@ -70,6 +70,12 @@ flowchart LR
   become suggestions the admin confirms – all into the same impact → plan → approve flow
   ([`docs/REALTIME.md`](docs/REALTIME.md)).
 - **Assign Work:** new orders (form or CSV), best partner with a reason, step-by-step delivery flow.
+- **For customers and the field** ([`docs/PRODUCT.md`](docs/PRODUCT.md)): photo issue reports (a vision model reads
+  them when a key is set); a public **tracking link** per order (`/track?code=…`, no sign-in: stage, ETA, partner's
+  first name, mini map); customer updates by **WhatsApp** (or drafts in Demo mode); **proof of delivery** – photo +
+  the customer's 4-digit code or a signature, required for medical orders; an **Analytics** page (delays by road ×
+  hour, on time per day, disruption heatmap, partner performance, model accuracy); the partner app in **Tamil** or
+  English.
 - **No missed orders:** every assignment is an offer – Sent → Seen → Ringing (alarm) → AI voice call (Twilio, or a
   simulated call in Demo mode) → red admin alert with the next-best partner and one-click Reassign
   ([`docs/AI_CALL.md`](docs/AI_CALL.md)).
@@ -87,6 +93,7 @@ flowchart LR
 | Data | SQLite (WAL), pandas |
 | Maps & charts | Folium, OSRM shapes (cached), Esri tiles, Plotly, NetworkX |
 | Live data | Browser geolocation, OpenWeatherMap, TomTom Traffic Flow (all optional) |
+| Customers | WhatsApp (Twilio or Cloud API), Gemini / Groq vision for photos (all optional) |
 | Quality & ops | pytest, ruff, GitHub Actions, Docker |
 
 ## Run it
@@ -127,21 +134,26 @@ For judges and this README only – never shown in the app.
    accident reported in the rain shows more delay than on a dry day.
 8. *Escalation:* assign a **medical** order to DP102 and don't answer: full-screen card → alarm at 1 min → call
    (simulated without Twilio keys) at 3 min → red alert with **Reassign to …** at 5 min (times: Super Admin → Overview).
+9. *Customer & proof:* Deliveries → select an order → open its **Tracking link** in a private window (no sign-in).
+   Sign in as `DP101` → the medical order D06 → **Delivered** asks for a photo + **Send code** (DEMO code on screen)
+   or a signature. *Analytics* shows delays by road × hour and partner performance; the partner sidebar switches to
+   **தமிழ்**.
 
 ## Project structure
 ```
 app.py         sign-in first, then role-based navigation
 views/         pages: manager/ · partner/ · super/ · login · console
 modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, escalation, predict, optimizer, learning, tracking, realtime,
-               geometry, places) + UI helpers (ui, manager_ui, partner_ui, report_ui, login_ui, escalation_ui,
-               live_map, graph_viz)
-services/      optional outside providers with a Demo-mode fallback (voice_call, weather, traffic)
-components/    geolocation (the partner phone's GPS, plain HTML/JS)
-ml/            synthetic history generator + LightGBM training      models/   exported delay models (JSON)
+               geometry, places, pod, analytics, i18n) + UI helpers (ui, manager_ui, partner_ui, report_ui,
+               login_ui, escalation_ui, live_map, track_ui, graph_viz)
+services/      optional outside providers with a Demo-mode fallback (voice_call, weather, traffic, vision, messaging)
+components/    geolocation (the partner phone's GPS) · signature pad – plain HTML/JS
+i18n/          en.json + ta.json (partner app texts)
+ml/            synthetic history, LightGBM training, history summary   models/   exported delay models (JSON)
 api/           FastAPI REST for a native app + Twilio webhooks + the offer timer
 data/          demo data with real Coimbatore coordinates + cached road shapes
-tests/         207 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, live data,
-               API, headless UI)
+tests/         225 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, live data,
+               product: photos, tracking, proof, analytics, Tamil · API, headless UI)
 ```
 
 ## Roadmap
@@ -151,7 +163,7 @@ tests/         207 tests (flows, RBAC, persistence, assignment, escalation, ML, 
 - [x] OR-Tools re-optimisation alongside the rule-based plan
 - [x] Learning from admin decisions
 - [x] Real-world data: live GPS, weather, traffic
-- [ ] Photo reports, customer tracking link, proof of delivery, analytics, Tamil UI
+- [x] Photo reports, customer tracking link, proof of delivery, analytics, Tamil UI
 - [ ] Platform: PostgreSQL/PostGIS, JWT API, WebSockets, push
 - [ ] Flutter partner app
 

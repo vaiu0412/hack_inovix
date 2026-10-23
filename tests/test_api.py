@@ -114,6 +114,9 @@ def test_proof_of_delivery(client, karthik):
     assert client.post("/me/deliveries/D06/pod/code", headers=karthik).status_code == 403   # not his order
     sent = client.post("/me/deliveries/D06/pod/code", headers=murugan).json()
     assert sent["status"] == "draft" and len(sent["demo_code"]) == 4                        # Demo mode
+    east = token(client, "east.admin@deport.in", "Admin@123")
+    for path, who in (("/me/deliveries", murugan), ("/deliveries", east), ("/partners/DP101", east)):
+        assert "pod_code" not in client.get(path, headers=who).text                         # the hash never leaves
     photo = ("door.png", b"\x89PNG\r\n\x1a\n" + bytes(32), "image/png")
     assert client.post("/me/deliveries/D06/pod", headers=murugan, files={"photo": photo}).status_code == 409
     reply = client.post("/me/deliveries/D06/pod", headers=murugan, files={"photo": photo},

@@ -50,8 +50,9 @@ def get_partner_profile(dp_id, branch_id):
 def get_partner_deliveries(dp_id, branch_id):
     """This partner's deliveries (incl. ones reassigned to them), with a risk label for their own stops."""
     _own(dp_id, branch_id)
-    df = store._df("SELECT d.* FROM deliveries d JOIN partners p ON p.vehicle_id = d.vehicle_id "
-                   "WHERE p.partner_id = ? AND d.branch_id = ? ORDER BY d.stop_order", (dp_id, branch_id))
+    df = store.public(store._df("SELECT d.* FROM deliveries d JOIN partners p ON p.vehicle_id = d.vehicle_id "
+                                "WHERE p.partner_id = ? AND d.branch_id = ? ORDER BY d.stop_order",
+                                (dp_id, branch_id)))
     df["eta_min"] = df["planned_eta"].apply(store.hhmm_to_min)
     df["deadline_min"] = df["deadline"].apply(store.hhmm_to_min)
     own_ids = set(df["delivery_id"])

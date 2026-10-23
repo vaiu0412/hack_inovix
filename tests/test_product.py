@@ -139,7 +139,9 @@ def test_proof_with_customer_code(db):
     assert pod.complete("DP101", "CBE-E", "D06", photo=PNG, code=code, note="Handed to the nurse")
     d = store.deliveries_df().set_index("delivery_id").loc["D06"]
     assert d["status"] == "delivered" and d["pod_method"] == "code" and Path(d["pod_photo_path"]).exists()
-    assert d["pod_code_hash"] is None and d["proof_note"] == "Handed to the nurse"
+    assert "pod_code_hash" not in d and d["proof_note"] == "Handed to the nurse"   # never in what screens get
+    with store.connect() as conn:
+        assert conn.execute("SELECT pod_code_hash FROM deliveries WHERE delivery_id = 'D06'").fetchone()[0] is None
 
 
 def test_code_locks_after_five_tries(db):

@@ -46,6 +46,7 @@ from modules.parser import setting
 from services import voice_call
 
 log = logging.getLogger("deport.api")
+SERVER_ONLY = {*store.PRIVATE_COLUMNS, "password_hash", "salt"}
 ESCALATION_EVERY_SEC = 20
 
 
@@ -215,9 +216,18 @@ class Decision(BaseModel):
     reason: str = "Not needed"
 
 
+def _scrub(obj):
+    """Drop server-only fields (proof-code hashes, password hashes) at any depth."""
+    if isinstance(obj, dict):
+        return {k: _scrub(v) for k, v in obj.items() if k not in SERVER_ONLY}
+    if isinstance(obj, list):
+        return [_scrub(v) for v in obj]
+    return obj
+
+
 def _clean(obj):
-    """Plain JSON types only (pandas/numpy numbers become normal numbers)."""
-    return json.loads(json.dumps(obj, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
+    """Plain JSON types only (pandas/numpy numbers become normal numbers), without server-only fields."""
+    return _scrub(json.loads(json.dumps(obj, default=lambda o: o.item() if hasattr(o, "item") else str(o))))
 
 
 def _public(issue):
@@ -227,7 +237,7 @@ def _public(issue):
 
 
 def _records(df):
-    return json.loads(df.to_json(orient="records"))
+    return _scrub(json.loads(df.to_json(orient="records")))
 
 
 def _issue_or_404(issue_id, branch_id):

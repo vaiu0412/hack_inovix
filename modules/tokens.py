@@ -6,7 +6,6 @@ Claims: sub (user id), role, branch, dp, sid (the hash of a server-side session)
 signature AND that the session is still valid, so signing out, deactivating a user or switching off a branch stops
 a token at once – a JWT alone is never trusted for longer than its session.
 """
-import secrets
 import time
 
 import jwt
@@ -20,14 +19,7 @@ ACCESS_MINUTES = 60
 
 
 def _secret():
-    configured = setting("JWT_SECRET")
-    if configured:
-        return str(configured)
-    saved = store.get_setting("jwt_secret")
-    if saved:
-        return saved
-    store.set_setting("jwt_secret", secrets.token_urlsafe(48), "system")  # Demo mode: made once, then shared
-    return store.get_setting("jwt_secret")
+    return str(setting("JWT_SECRET") or store.app_secret("jwt_secret"))  # Demo mode: made once, then shared
 
 
 def issue(user, session_hash, session_expires_at, minutes=ACCESS_MINUTES):

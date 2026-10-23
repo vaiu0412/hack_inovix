@@ -2,7 +2,8 @@
 
 Medical orders can only be marked Delivered with a photo AND the customer's 4-digit code or their signature (other
 orders: optional). The code goes to the customer by WhatsApp when messaging is set up; otherwise the partner's
-screen shows it as a DEMO code. Only a hash of the code is stored; it lasts 15 minutes and allows 5 tries.
+screen shows it as a DEMO code. Only a keyed hash of the code is stored (never sent anywhere); it lasts
+15 minutes and allows 5 tries.
 """
 import hashlib
 import hmac
@@ -23,7 +24,9 @@ def required(priority):
 
 
 def _hash(delivery_id, code):
-    return hashlib.sha256(f"{delivery_id}:{code}".encode()).hexdigest()
+    """Keyed hash (HMAC-SHA256 with a server secret): a 4-digit code can't be recovered from it."""
+    key = store.app_secret("pod_secret").encode()
+    return hmac.new(key, f"{delivery_id}:{code}".encode(), hashlib.sha256).hexdigest()
 
 
 def send_code(dp_id, branch_id, delivery_id):

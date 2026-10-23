@@ -49,6 +49,7 @@ TABLES = ["branches", "roles", "permissions", "role_permissions", "partners", "v
 BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events", "escalations",
                  "decisions", "location_log", "suggestions"]
 ACTIVE_DONE = ("delivered", "failed")
+PRIVATE_COLUMNS = ("pod_code_hash", "pod_code_expires", "pod_code_attempts")  # never leave the server
 JSON_FIELDS = {"problem", "plan"}
 OPEN_ISSUE_STATUSES = ("new", "analysed")
 
@@ -584,6 +585,27 @@ def get_branch(branch_id):
     return dict(row) if row else None
 
 
+def public(rows):
+    """Delivery rows without the proof-of-delivery secrets (DataFrame, dict or list of dicts)."""
+    if isinstance(rows, pd.DataFrame):
+        return rows.drop(columns=[c for c in PRIVATE_COLUMNS if c in rows.columns])
+    if isinstance(rows, dict):
+        return {k: v for k, v in rows.items() if k not in PRIVATE_COLUMNS}
+    return [public(r) for r in rows]
+
+
+def app_secret(name):
+    """A random secret made once and kept in the settings table, shared by the app and the API (never in code).
+    Safe when two processes ask at the same moment: the first one wins."""
+    saved = get_setting(name)
+    if not saved:
+        with connect() as conn:
+            conn.execute("INSERT INTO settings(key, value, updated_at, updated_by) VALUES (?,?,?,?) "
+                         "ON CONFLICT(key) DO NOTHING", (name, secrets.token_urlsafe(48), now_iso(), "system"))
+        saved = get_setting(name)
+    return saved
+
+
 def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
     """Deliveries (optionally one vehicle, one branch, open only) with deadline/ETA in minutes."""
     clauses, params = [], []
@@ -595,7 +617,7 @@ def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
         params.append(branch_id)
     if not include_done:
         clauses.append("status NOT IN ('delivered', 'failed')")
-    df = _df("SELECT * FROM deliveries" + _where(clauses) + " ORDER BY vehicle_id, stop_order", params)
+    df = public(_df("SELECT * FROM deliveries" + _where(clauses) + " ORDER BY vehicle_id, stop_order", params))
     df["deadline_min"] = df["deadline"].apply(hhmm_to_min)
     # an unassigned order has no ETA yet: use its deadline so sorting and maths still work
     df["eta_min"] = [hhmm_to_min(eta) if isinstance(eta, str) and eta else due

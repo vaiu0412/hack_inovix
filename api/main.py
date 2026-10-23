@@ -3,8 +3,12 @@
 Run:   uvicorn api.main:app --reload
 Docs:  http://localhost:8000/docs   (click "Authorize" and paste the token from POST /login)
 
-Auth:  POST /login {identifier, password, super_console?} -> {"token": ...} (a server-side session,
-       only its hash is stored); send "Authorization: Bearer <token>"; POST /logout revokes it.
+Auth:  POST /login {identifier, password, super_console?} -> {"token": <JWT access token, 60 min>,
+       "refresh_token": <session token>, "expires_in": ...}. Send "Authorization: Bearer <token>";
+       POST /token/refresh {refresh_token} gives a new access token while the session lasts; POST /logout ends
+       the session (every token of it stops working at once). The app's own session tokens are accepted too.
+Live:  WebSockets /ws/partner and /ws/admin (?token=…) stream offers, alerts and messages – see api/live.py.
+Push:  POST /me/devices {token} registers a phone for Firebase push (new order offers), DELETE removes it.
 Roles: Super Admin   -> /branches (summaries), /demo/reset
        Branch Admin  -> /kpis, /partners, /deliveries, /map, /issues, /escalations – own branch only
        Delivery Partner -> /me… – own data only; dp_id and branch come from the session
@@ -18,11 +22,25 @@ import json
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from modules import auth, escalation, issues, learning, operations, partner_scope, pod, realtime, store, tracking
+from api import live
+from modules import (
+    auth,
+    db,
+    escalation,
+    issues,
+    learning,
+    operations,
+    partner_scope,
+    pod,
+    realtime,
+    store,
+    tokens,
+    tracking,
+)
 from modules.data_loader import load_all
 from modules.parser import setting
 from services import voice_call
@@ -96,9 +114,20 @@ def _token(authorization):
     return authorization.split(" ", 1)[1].strip()
 
 
+def user_for_token(token):
+    """The user behind an access token (JWT: signature, expiry AND its session still valid) or a session token."""
+    if tokens.looks_like_jwt(token):
+        claims = tokens.read(token)
+        if claims is None:
+            return None
+        user = auth.validate_session_hash(claims["sid"])
+        return user if user and user["user_id"] == claims["sub"] else None
+    return auth.validate_session(token)
+
+
 def current_user(authorization: str | None = Header(None)):
     """The signed-in user from the 'Authorization: Bearer <token>' header, or 401."""
-    user = auth.validate_session(_token(authorization))
+    user = user_for_token(_token(authorization))
     if user is None:
         raise HTTPException(401, "Invalid, expired or revoked session")
     return user
@@ -168,6 +197,19 @@ class LocationIn(BaseModel):
     accuracy_m: float | None = None
 
 
+class RefreshIn(BaseModel):
+    """The refresh token from POST /login."""
+
+    refresh_token: str
+
+
+class DeviceIn(BaseModel):
+    """A phone's Firebase Cloud Messaging token."""
+
+    token: str
+    platform: str = "android"
+
+
 class Decision(BaseModel):
     """Why a Branch Admin rejected a plan."""
     reason: str = "Not needed"
@@ -210,7 +252,13 @@ def _forbidden(call):
 @app.get("/health")
 def health():
     """Liveness check for load balancers and uptime monitors."""
-    return {"status": "ok"}
+    return {"status": "ok", "database": db.describe()}
+
+
+def _access(user, session_token):
+    sid = auth.session_hash(session_token)
+    token, seconds = tokens.issue(user, sid, auth.session_expires_at(sid))
+    return {"token": token, "access_token": token, "token_type": "bearer", "expires_in": seconds}
 
 
 @app.post("/login")
@@ -222,15 +270,43 @@ def login(body: LoginIn):
             auth.MESSAGES["inactive"], auth.MESSAGES["branch_inactive"], auth.MESSAGES["use_super_portal"],
             auth.MESSAGES["super_only"]) else 401
         raise HTTPException(status, error)
-    token = auth.create_session(user["user_id"], remember_me=body.remember_me)
-    return {"token": token, "token_type": "bearer", "user": _clean(user)}
+    session = auth.create_session(user["user_id"], remember_me=body.remember_me)
+    return {**_access(user, session), "refresh_token": session, "user": _clean(user)}
+
+
+@app.post("/token/refresh")
+def refresh(body: RefreshIn):
+    """A new access token for a session that is still valid (401 once it ended)."""
+    user = auth.validate_session(body.refresh_token)
+    if user is None:
+        raise HTTPException(401, "Session ended – sign in again")
+    return _access(user, body.refresh_token)
 
 
 @app.post("/logout")
 def logout(authorization: str | None = Header(None)):
-    """Revoke the current session token."""
-    auth.revoke_session(_token(authorization))
+    """End the session behind the token: the access and refresh tokens stop working everywhere."""
+    token = _token(authorization)
+    if tokens.looks_like_jwt(token):
+        claims = tokens.read(token)
+        if claims:
+            auth.revoke_session_hash(claims["sid"])
+    else:
+        auth.revoke_session(token)
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- live updates (WebSockets)
+@app.websocket("/ws/partner")
+async def ws_partner(websocket: WebSocket, token: str = Query(""), since: int | None = Query(None)):
+    """A delivery partner's live feed: their new offers, escalation steps and messages."""
+    await live.stream(websocket, user_for_token, token, since, roles=("partner",))
+
+
+@app.websocket("/ws/admin")
+async def ws_admin(websocket: WebSocket, token: str = Query(""), since: int | None = Query(None)):
+    """A Branch Admin's live feed (own branch: assignments, offers, alerts, plans); Super Admin: every branch."""
+    await live.stream(websocket, user_for_token, token, since, roles=("branch_admin", "super_admin"))
 
 
 # ---------------------------------------------------------------- Super Admin (summary level)
@@ -290,6 +366,23 @@ def deliver(delivery_id: str, user=Depends(partner_only)):
     except ValueError as error:  # e.g. not picked up yet – steps can't be skipped
         raise HTTPException(409, str(error)) from error
     return {"ok": True, "changed": changed}
+
+
+@app.post("/me/devices", status_code=201)
+def add_device(body: DeviceIn, user=Depends(partner_only)):
+    """Register this phone for push notifications (Firebase Cloud Messaging token)."""
+    try:
+        count = store.register_device(user, body.token, body.platform)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    return {"ok": True, "devices": count}
+
+
+@app.delete("/me/devices")
+def remove_device(body: DeviceIn, user=Depends(partner_only)):
+    """Stop push notifications to this phone (sign-out on the phone)."""
+    store.remove_device(body.token, user_id=user["user_id"])
+    return {"ok": True}
 
 
 @app.post("/me/location")
@@ -398,11 +491,34 @@ async def report_my_voice_issue(audio: UploadFile = File(...), quick_type: str |
     return _my_incident(user, issue_id)
 
 
+@app.post("/me/issues/photo", status_code=201)
+async def report_my_photo_issue(photo: UploadFile = File(...), text: str = Form(""),
+                                quick_type: str | None = Form(None), user=Depends(partner_only)):
+    """Report a problem with a photo (+ optional text / quick type). With a vision key the photo alone is enough;
+    without one, quick_type is needed (422 says so)."""
+    dp, branch = user["dp_id"], user["branch_id"]
+    image = await photo.read()
+    if not image or len(image) > 8_000_000:
+        raise HTTPException(422, "Send one photo, at most 8 MB")
+    seen = partner_scope.preview_issue(dp, branch, text=text, quick_type=quick_type, photo=image)
+    if seen["problem"] is None:
+        raise HTTPException(422, "Pick the type (quick_type) – the photo could not be read on its own")
+    issue_id = partner_scope.report_issue(dp, branch, seen["problem"], transcript=seen["transcript"],
+                                          quick_type=quick_type, photo=image)
+    return _my_incident(user, issue_id)
+
+
 # ---------------------------------------------------------------- Branch Admin (own branch only)
 @app.get("/kpis")
 def kpis(user=Depends(branch_admin_only)):
     """The branch's live KPIs (deliveries, delays, critical, open alerts)."""
     return _clean(operations.kpis(user["branch_id"]))
+
+
+@app.get("/vehicles/nearest")
+def nearest(lat: float, lng: float, limit: int = 5, user=Depends(branch_admin_only)):
+    """The branch's vehicles nearest to a point (PostGIS when available), closest first, with km."""
+    return _clean(store.nearest_vehicles(user["branch_id"], lat, lng, limit=max(1, min(limit, 50))))
 
 
 @app.get("/partners")

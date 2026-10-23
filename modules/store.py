@@ -12,6 +12,7 @@ Signing out only revokes the session. Every write goes through one connection he
 """
 import json
 import os
+import secrets
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -24,13 +25,19 @@ from modules import geometry
 from modules.data_loader import DATA_DIR, hhmm_to_min, load_all, load_branches, load_partners, nearest_place
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 ORDER_COLUMNS = {  # work assignment (v6): who created / assigned / handled an order, and when
     "created_by": "TEXT", "created_at": "TEXT", "assigned_at": "TEXT", "assigned_by": "TEXT", "accepted_at": "TEXT",
     "picked_at": "TEXT", "delivered_at": "TEXT", "package_size": "TEXT DEFAULT 'small'", "category": "TEXT",
     "notes": "TEXT DEFAULT ''", "proof_note": "TEXT DEFAULT ''"}
 OFFER_COLUMNS = {  # order offers and escalation (v7): sent -> seen -> ringing -> calling -> accepted / declined / ...
     "offer_status": "TEXT", "offered_at": "TEXT", "seen_at": "TEXT", "escalation_level": "INTEGER DEFAULT 0"}
+PRODUCT_COLUMNS = {  # v11: photo reports, customer tracking link, proof of delivery, message delivery status
+    "issues": {"photo_path": "TEXT"},
+    "deliveries": {"track_code": "TEXT", "pod_method": "TEXT", "pod_at": "TEXT", "pod_photo_path": "TEXT",
+                   "pod_signature_path": "TEXT", "pod_code_hash": "TEXT", "pod_code_expires": "REAL",
+                   "pod_code_attempts": "INTEGER DEFAULT 0"},
+    "messages": {"status": "TEXT", "provider": "TEXT", "delivery_id": "TEXT"}}
 SEED_SIZE = {"bike": "small", "car": "small", "van": "medium", "truck": "large"}
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS branches (
@@ -52,7 +59,8 @@ CREATE TABLE IF NOT EXISTS deliveries (
     note TEXT DEFAULT '', branch_id TEXT, created_by TEXT, created_at TEXT, assigned_at TEXT, assigned_by TEXT,
     accepted_at TEXT, picked_at TEXT, delivered_at TEXT, package_size TEXT DEFAULT 'small', category TEXT,
     notes TEXT DEFAULT '', proof_note TEXT DEFAULT '', offer_status TEXT, offered_at TEXT, seen_at TEXT,
-    escalation_level INTEGER DEFAULT 0);
+    escalation_level INTEGER DEFAULT 0, track_code TEXT, pod_method TEXT, pod_at TEXT, pod_photo_path TEXT,
+    pod_signature_path TEXT, pod_code_hash TEXT, pod_code_expires REAL, pod_code_attempts INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS assignment_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_id TEXT NOT NULL, from_dp TEXT, to_dp TEXT, by_user TEXT,
     reason TEXT, time TEXT, branch_id TEXT);
@@ -60,13 +68,14 @@ CREATE TABLE IF NOT EXISTS issues (
     issue_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, partner_id TEXT, source TEXT,
     quick_type TEXT, text TEXT, audio BLOB, transcript TEXT, transcript_engine TEXT,
     problem TEXT, summary TEXT, status TEXT, plan TEXT, decided_at TEXT, decision_note TEXT, branch_id TEXT,
-    audio_path TEXT);
+    audio_path TEXT, photo_path TEXT);
 CREATE TABLE IF NOT EXISTS disruptions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER, data TEXT, active INTEGER DEFAULT 1,
     created_at TEXT, branch_id TEXT);
 CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, issue_id INTEGER, to_partner TEXT,
-    to_customer TEXT, to_phone TEXT, channel TEXT, text TEXT, read INTEGER DEFAULT 0, branch_id TEXT);
+    to_customer TEXT, to_phone TEXT, channel TEXT, text TEXT, read INTEGER DEFAULT 0, branch_id TEXT,
+    status TEXT, provider TEXT, delivery_id TEXT);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, kind TEXT, text TEXT, issue_id INTEGER, branch_id TEXT);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -247,9 +256,18 @@ def _where(clauses):
 
 
 # ---------------------------------------------------------------- setup, migration, seed
+_INIT_LOCK = threading.RLock()  # sessions are threads of one process: one at a time creates or upgrades the file
+
+
 def init_db():
     """Create the tables, upgrade older databases in place, and seed the demo ONLY when the database is empty.
-    Runs on every page load, so it must never change existing data."""
+    Runs on every page load, so it must never change existing data. Serialised: two sessions opening a brand-new
+    file at once would otherwise race on switching it to WAL ("database is locked")."""
+    with _INIT_LOCK:
+        _init_db()
+
+
+def _init_db():
     with connect() as conn:
         conn.execute("PRAGMA journal_mode = WAL")  # readers never block the writer; stored in the file
         conn.executescript(SCHEMA)
@@ -282,6 +300,9 @@ def init_db():
             _set_version(conn, 9)  # decisions log: the table comes from SCHEMA
         if current < 10:
             _set_version(conn, 10)  # live GPS log and traffic / weather suggestions: tables from SCHEMA
+        if current < 11:
+            _migrate_v11(conn)
+        _fill_track_codes(conn)  # every delivery has a customer tracking link
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:  # data but no accounts: add the demo ones
             _seed_users(conn)
             conn.execute("INSERT INTO audit_log(time, actor_user_id, action, target, details_json) VALUES (?,?,?,?,?)",
@@ -429,6 +450,25 @@ def _migrate_v7(conn):
     _set_version(conn, 7)
 
 
+def _migrate_v11(conn):
+    """Photo reports, customer tracking links, proof of delivery and message delivery status."""
+    for table, columns in PRODUCT_COLUMNS.items():
+        have = _columns(conn, table)
+        for column, kind in columns.items():
+            if column not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+    _set_version(conn, 11)
+
+
+def _fill_track_codes(conn):
+    """Give every delivery without one an unguessable tracking code (the public /track?code=... link)."""
+    if "track_code" not in _columns(conn, "deliveries"):
+        return
+    for (delivery_id,) in conn.execute("SELECT delivery_id FROM deliveries WHERE track_code IS NULL").fetchall():
+        conn.execute("UPDATE deliveries SET track_code = ? WHERE delivery_id = ?", (secrets.token_urlsafe(9),
+                                                                                    delivery_id))
+
+
 def _migrate_v8(conn):
     """Partner experience in months (a feature of the delay model); the demo partners get their CSV values."""
     if "experience_months" not in _columns(conn, "partners"):
@@ -492,6 +532,7 @@ def reset_demo(backup=True):
               int(d.stop_order), d.planned_eta, d.deadline, d.priority, d.customer_phone, d.vehicle_id,
               branch_of[d.vehicle_id], now_iso(), now_iso(), SEED_SIZE.get(type_of[d.vehicle_id], "small"))
              for d in data["deliveries"].itertuples()])
+        _fill_track_codes(conn)
         _seed_users(conn)
         _seed_geometry(conn)
         for branch_id in partners["branch_id"].unique():
@@ -684,6 +725,14 @@ def active_disruptions(branch_id=None):
     return [json.loads(r["data"]) for r in rows]
 
 
+def disruption_history(branch_id=None, limit=500):
+    """Every disruption (active or ended), newest first – for the Analytics heatmap."""
+    with connect() as conn:
+        rows = conn.execute("SELECT data FROM disruptions" + (" WHERE branch_id = ?" if branch_id else "")
+                            + " ORDER BY id DESC LIMIT ?", ((branch_id,) if branch_id else ()) + (limit,)).fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
 def messages_for(partner_id, limit=20):
     """A partner's latest messages, newest first."""
     with connect() as conn:
@@ -693,8 +742,9 @@ def messages_for(partner_id, limit=20):
 
 
 def customer_messages(limit=50, branch_id=None):
-    """SMS texts sent to customers, newest first."""
-    return _df("SELECT created_at, issue_id, to_customer, to_phone, text FROM messages WHERE channel = 'sms'"
+    """Messages to customers (WhatsApp / SMS / draft), newest first."""
+    return _df("SELECT created_at, issue_id, to_customer, to_phone, text, status, provider FROM messages "
+               "WHERE channel = 'sms'"
                + (" AND branch_id = ?" if branch_id else "") + " ORDER BY id DESC LIMIT ?",
                ((branch_id,) if branch_id else ()) + (limit,))
 
@@ -735,16 +785,18 @@ def branch_summaries():
 
 
 # ---------------------------------------------------------------- writes
-def add_issue(partner_id, text="", audio=None, quick_type=None, source="partner", branch_id=None, audio_path=None):
-    """Save a new report (text and/or voice note). Returns the issue id."""
+def add_issue(partner_id, text="", audio=None, quick_type=None, source="partner", branch_id=None, audio_path=None,
+              photo=None):
+    """Save a new report (text, voice note and/or photo). Returns the issue id."""
     if audio and not audio_path:
         audio_path = str(save_voice(partner_id, audio))
+    photo_path = str(save_file("photos", partner_id, photo)) if photo else None
     with connect() as conn:
         cur = conn.execute(
             "INSERT INTO issues(created_at, partner_id, source, quick_type, text, audio, audio_path, status, "
-            "branch_id) "
-            "VALUES (?,?,?,?,?,?,?, 'new', ?)",
-            (now_stamp(), partner_id, source, quick_type, text, audio, audio_path, branch_id),
+            "branch_id, photo_path) "
+            "VALUES (?,?,?,?,?,?,?, 'new', ?, ?)",
+            (now_stamp(), partner_id, source, quick_type, text, audio, audio_path, branch_id, photo_path),
         )
         _bump(conn)
         return cur.lastrowid
@@ -756,6 +808,44 @@ def save_voice(owner, audio):
     target = files_dir("voice") / f"{owner}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.wav"
     target.write_bytes(audio)
     return target
+
+
+def image_type(data):
+    """'png', 'jpg' or 'webp' from the first bytes of an image."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return "jpg"
+
+
+def save_file(folder, owner, data):
+    """Image bytes -> data/<folder>/<owner>-<time>.<ext> next to the database. Returns the path."""
+    target = files_dir(folder) / f"{owner}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.{image_type(data)}"
+    target.write_bytes(data)
+    return target
+
+
+def delivery_by_code(code):
+    """The delivery behind a public tracking code, or None."""
+    if not code:
+        return None
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM deliveries WHERE track_code = ?", (str(code),)).fetchone()
+    return dict(row) if row else None
+
+
+def track_code(delivery_id):
+    """The delivery's tracking code (made on first use)."""
+    with connect() as conn:
+        row = conn.execute("SELECT track_code FROM deliveries WHERE delivery_id = ?", (delivery_id,)).fetchone()
+        if row is None:
+            return None
+        if row["track_code"]:
+            return row["track_code"]
+        code = secrets.token_urlsafe(9)
+        conn.execute("UPDATE deliveries SET track_code = ? WHERE delivery_id = ?", (code, delivery_id))
+        return code
 
 
 def get_draft(user_id, form):
@@ -904,12 +994,22 @@ def add_disruption(issue_id, disruption, branch_id=None):
         _bump(conn)
 
 
-def add_message(text, to_partner=None, to_customer=None, to_phone=None, channel="app", issue_id=None, branch_id=None):
-    """Queue a message to a partner (app) or a customer (SMS)."""
+def add_message(text, to_partner=None, to_customer=None, to_phone=None, channel="app", issue_id=None, branch_id=None,
+                delivery_id=None, status=None):
+    """Queue a message to a partner (app) or a customer (SMS / WhatsApp). Returns its id."""
     with connect() as conn:
-        conn.execute("INSERT INTO messages(created_at, issue_id, to_partner, to_customer, to_phone, channel, text, "
-                     "branch_id) VALUES (?,?,?,?,?,?,?,?)",
-                     (now_stamp(), issue_id, to_partner, to_customer, to_phone, channel, text, branch_id))
+        cur = conn.execute("INSERT INTO messages(created_at, issue_id, to_partner, to_customer, to_phone, channel, "
+                           "text, branch_id, delivery_id, status) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                           (now_stamp(), issue_id, to_partner, to_customer, to_phone, channel, text, branch_id,
+                            delivery_id, status or ("draft" if channel == "sms" else None)))
+        _bump(conn)
+        return cur.lastrowid
+
+
+def set_message_status(message_id, status, provider):
+    """Record how a customer message went out: sent / failed / draft, and by which provider."""
+    with connect() as conn:
+        conn.execute("UPDATE messages SET status = ?, provider = ? WHERE id = ?", (status, provider, message_id))
         _bump(conn)
 
 

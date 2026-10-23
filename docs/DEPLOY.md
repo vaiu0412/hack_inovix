@@ -70,6 +70,11 @@ the partner app shows a simulated call.
 `GROQ_API_KEY` (free at console.groq.com) or `GEMINI_API_KEY`. Without a key, reports are understood by the
 built-in Tamil/English rules and voice uses free Google speech recognition.
 
+### Live data (weather, traffic, GPS)
+`OWM_API_KEY` (OpenWeatherMap) and `TOMTOM_API_KEY` (TomTom Traffic Flow), both free tiers. GPS needs no key but the
+app must be served over **https** (browsers share location only on https or localhost). See
+[`REALTIME.md`](REALTIME.md).
+
 ### Learning from decisions
 The API retrains the acceptance model once a day by itself. Without the API, run
 `python scripts/retrain_acceptance.py` nightly (cron) on the same `DB_PATH` – see [`LEARNING.md`](LEARNING.md).

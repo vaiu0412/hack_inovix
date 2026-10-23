@@ -65,6 +65,10 @@ flowchart LR
 - **Learns from decisions:** every recommendation's fate is logged (accepted, skipped, rejected, modified); a
   logistic regression learns what admins take and plans are ranked by *chance taken × impact*; **Insights** shows
   acceptance by action type and what gets changed ([`docs/LEARNING.md`](docs/LEARNING.md)).
+- **Real-world data:** partner phones share GPS every 30 s on duty (live position + trail on the map; simulated
+  movement in Demo mode); OpenWeatherMap rain feeds the delay model and opens *Weather risk* alerts; TomTom jams
+  become suggestions the admin confirms – all into the same impact → plan → approve flow
+  ([`docs/REALTIME.md`](docs/REALTIME.md)).
 - **Assign Work:** new orders (form or CSV), best partner with a reason, step-by-step delivery flow.
 - **No missed orders:** every assignment is an offer – Sent → Seen → Ringing (alarm) → AI voice call (Twilio, or a
   simulated call in Demo mode) → red admin alert with the next-best partner and one-click Reassign
@@ -82,6 +86,7 @@ flowchart LR
 | Optimisation | Google OR-Tools (VRP with time windows + capacities) |
 | Data | SQLite (WAL), pandas |
 | Maps & charts | Folium, OSRM shapes (cached), Esri tiles, Plotly, NetworkX |
+| Live data | Browser geolocation, OpenWeatherMap, TomTom Traffic Flow (all optional) |
 | Quality & ops | pytest, ruff, GitHub Actions, Docker |
 
 ## Run it
@@ -127,14 +132,16 @@ For judges and this README only – never shown in the app.
 ```
 app.py         sign-in first, then role-based navigation
 views/         pages: manager/ · partner/ · super/ · login · console
-modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, escalation, predict, optimizer, learning,
+modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, escalation, predict, optimizer, learning, tracking, realtime,
                geometry, places) + UI helpers (ui, manager_ui, partner_ui, report_ui, login_ui, escalation_ui,
                live_map, graph_viz)
-services/      optional outside providers with a Demo-mode fallback (voice_call: Twilio)
+services/      optional outside providers with a Demo-mode fallback (voice_call, weather, traffic)
+components/    geolocation (the partner phone's GPS, plain HTML/JS)
 ml/            synthetic history generator + LightGBM training      models/   exported delay models (JSON)
 api/           FastAPI REST for a native app + Twilio webhooks + the offer timer
 data/          demo data with real Coimbatore coordinates + cached road shapes
-tests/         197 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, API, UI)
+tests/         207 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, live data,
+               API, headless UI)
 ```
 
 ## Roadmap
@@ -143,7 +150,7 @@ tests/         197 tests (flows, RBAC, persistence, assignment, escalation, ML, 
 - [x] Delay prediction model (proactive "likely late")
 - [x] OR-Tools re-optimisation alongside the rule-based plan
 - [x] Learning from admin decisions
-- [ ] Real-world data: live GPS, weather, traffic
+- [x] Real-world data: live GPS, weather, traffic
 - [ ] Photo reports, customer tracking link, proof of delivery, analytics, Tamil UI
 - [ ] Platform: PostgreSQL/PostGIS, JWT API, WebSockets, push
 - [ ] Flutter partner app

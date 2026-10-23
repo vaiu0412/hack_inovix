@@ -211,10 +211,13 @@ def test_demo_flow_stays_inside_the_branch(db, east):
 
 
 # ---------------------------------------------------------------- upgrade of an old database
+@pytest.mark.sqlite_only
 def test_old_database_is_migrated_in_place(db, tmp_path):
     store.update_delivery("D01", status="delivered")
     path = store.db_path()
     conn = sqlite3.connect(path)
+    for (index,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'ix_%'").fetchall():
+        conn.execute(f"DROP INDEX {index}")  # an old file had none of today's indexes
     for table in store.BRANCH_SCOPED:
         conn.execute(f"ALTER TABLE {table} DROP COLUMN branch_id")
     conn.execute("DROP TABLE users")
@@ -234,6 +237,7 @@ def test_old_database_is_migrated_in_place(db, tmp_path):
     assert store.partners_df()["branch_id"].notna().all()
 
 
+@pytest.mark.sqlite_only
 def test_v3_database_moves_to_deport_accounts(db):
     conn = sqlite3.connect(store.db_path())
     conn.execute("UPDATE users SET email = REPLACE(email, '@deport.in', '@ripple.in')")

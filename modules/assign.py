@@ -311,10 +311,10 @@ def assign(actor, delivery_id, dp_id, reason="Assigned", source="manual"):
         if old and old["partner_id"] == dp_id:
             raise ValueError(f"{delivery_id} is already with {dp_id}.")
 
-        others = pd.read_sql_query(
-            "SELECT delivery_id, lat, lng, planned_eta FROM deliveries WHERE vehicle_id = ? AND delivery_id != ? "
-            "AND status NOT IN ('delivered', 'failed') AND planned_eta IS NOT NULL", conn,
-            params=(partner["vehicle_id"], delivery_id))
+        others = store.frame(
+            conn, "SELECT delivery_id, lat, lng, planned_eta FROM deliveries WHERE vehicle_id = ? AND delivery_id != ? "
+            "AND status NOT IN ('delivered', 'failed') AND planned_eta IS NOT NULL",
+            (partner["vehicle_id"], delivery_id))
         others["eta_min"] = others["planned_eta"].apply(hhmm_to_min)
         others = others.sort_values("eta_min")
         index, eta, added, _ = _insertion((partner["lat"], partner["lng"]),

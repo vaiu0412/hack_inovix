@@ -1,4 +1,4 @@
-"""Shared live data in SQLite – the single source of truth for every screen and the API.
+"""Shared live data in SQLite or PostgreSQL – the single source of truth for every screen and the API.
 
 Every operational row (partners, vehicles, deliveries, issues, disruptions, messages, events) carries
 a branch_id, and every read/write function here takes a branch_id to scope by (None = all branches,
@@ -9,6 +9,7 @@ RIPPLE_DB – to use another file; Docker uses /data/deport.db, the tests a temp
 when the database is empty; it is never reset automatically. "Reset demo" (Super Admin, with confirm) first saves a
 timestamped copy in data/backups/.
 Signing out only revokes the session. Every write goes through one connection helper that commits or rolls back.
+PostgreSQL: set DATABASE_URL (modules/db.py); tables come from Alembic, the SQL stays the same.
 """
 import json
 import os
@@ -21,11 +22,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from modules import geometry
+from modules import db, geometry, schema
 from modules.data_loader import DATA_DIR, hhmm_to_min, load_all, load_branches, load_partners, nearest_place
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 ORDER_COLUMNS = {  # work assignment (v6): who created / assigned / handled an order, and when
     "created_by": "TEXT", "created_at": "TEXT", "assigned_at": "TEXT", "assigned_by": "TEXT", "accepted_at": "TEXT",
     "picked_at": "TEXT", "delivered_at": "TEXT", "package_size": "TEXT DEFAULT 'small'", "category": "TEXT",
@@ -39,86 +40,12 @@ PRODUCT_COLUMNS = {  # v11: photo reports, customer tracking link, proof of deli
                    "pod_code_attempts": "INTEGER DEFAULT 0"},
     "messages": {"status": "TEXT", "provider": "TEXT", "delivery_id": "TEXT"}}
 SEED_SIZE = {"bike": "small", "car": "small", "van": "medium", "truck": "large"}
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS branches (
-    branch_id TEXT PRIMARY KEY, name TEXT NOT NULL, city TEXT, area TEXT, address TEXT, lat REAL, lng REAL,
-    is_active INTEGER DEFAULT 1, created_at TEXT);
-CREATE TABLE IF NOT EXISTS roles (role_id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL);
-CREATE TABLE IF NOT EXISTS permissions (perm_id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE NOT NULL);
-CREATE TABLE IF NOT EXISTS role_permissions (role_id TEXT, perm_id INTEGER, PRIMARY KEY (role_id, perm_id));
-CREATE TABLE IF NOT EXISTS partners (
-    partner_id TEXT PRIMARY KEY, name TEXT, phone TEXT, vehicle_id TEXT, shift_start TEXT,
-    shift_end TEXT, languages TEXT, rating REAL, status TEXT, branch_id TEXT, experience_months INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS vehicles (
-    vehicle_id TEXT PRIMARY KEY, reg_no TEXT, type TEXT, status TEXT, current_lat REAL,
-    current_lng REAL, route_roads TEXT, capacity INTEGER, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS deliveries (
-    delivery_id TEXT PRIMARY KEY, customer TEXT, address_area TEXT, lat REAL, lng REAL,
-    vehicle_id TEXT, road_id TEXT, stop_order INTEGER, planned_eta TEXT, deadline TEXT,
-    priority TEXT, customer_phone TEXT, status TEXT DEFAULT 'in_transit', original_vehicle TEXT,
-    note TEXT DEFAULT '', branch_id TEXT, created_by TEXT, created_at TEXT, assigned_at TEXT, assigned_by TEXT,
-    accepted_at TEXT, picked_at TEXT, delivered_at TEXT, package_size TEXT DEFAULT 'small', category TEXT,
-    notes TEXT DEFAULT '', proof_note TEXT DEFAULT '', offer_status TEXT, offered_at TEXT, seen_at TEXT,
-    escalation_level INTEGER DEFAULT 0, track_code TEXT, pod_method TEXT, pod_at TEXT, pod_photo_path TEXT,
-    pod_signature_path TEXT, pod_code_hash TEXT, pod_code_expires REAL, pod_code_attempts INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS assignment_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_id TEXT NOT NULL, from_dp TEXT, to_dp TEXT, by_user TEXT,
-    reason TEXT, time TEXT, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS issues (
-    issue_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, partner_id TEXT, source TEXT,
-    quick_type TEXT, text TEXT, audio BLOB, transcript TEXT, transcript_engine TEXT,
-    problem TEXT, summary TEXT, status TEXT, plan TEXT, decided_at TEXT, decision_note TEXT, branch_id TEXT,
-    audio_path TEXT, photo_path TEXT);
-CREATE TABLE IF NOT EXISTS disruptions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER, data TEXT, active INTEGER DEFAULT 1,
-    created_at TEXT, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, issue_id INTEGER, to_partner TEXT,
-    to_customer TEXT, to_phone TEXT, channel TEXT, text TEXT, read INTEGER DEFAULT 0, branch_id TEXT,
-    status TEXT, provider TEXT, delivery_id TEXT);
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, kind TEXT, text TEXT, issue_id INTEGER, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS users (
-    user_id TEXT PRIMARY KEY, email TEXT UNIQUE, phone TEXT, display_name TEXT,
-    role_id TEXT NOT NULL REFERENCES roles(role_id), branch_id TEXT NULL REFERENCES branches(branch_id),
-    dp_id TEXT NULL REFERENCES partners(partner_id), password_hash TEXT NOT NULL, salt TEXT NOT NULL,
-    is_active INTEGER DEFAULT 1, failed_attempts INTEGER DEFAULT 0, locked_until REAL DEFAULT 0,
-    last_login TEXT, created_by TEXT, created_at TEXT);
-CREATE TABLE IF NOT EXISTS sessions (
-    token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at REAL, expires_at REAL,
-    remember_me INTEGER DEFAULT 0, revoked INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS otp_codes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, purpose TEXT NOT NULL, code_hash TEXT NOT NULL,
-    salt TEXT NOT NULL, expires_at REAL, used INTEGER DEFAULT 0, attempts INTEGER DEFAULT 0, created_at REAL);
-CREATE TABLE IF NOT EXISTS drafts (
-    user_id TEXT NOT NULL, form TEXT NOT NULL, tile TEXT, text TEXT, transcript TEXT, audio_path TEXT, updated_at TEXT,
-    PRIMARY KEY (user_id, form));
-CREATE TABLE IF NOT EXISTS user_prefs (
-    user_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT, updated_at TEXT, PRIMARY KEY (user_id, key));
-CREATE TABLE IF NOT EXISTS route_geometry (key TEXT PRIMARY KEY, points TEXT NOT NULL, source TEXT, meta TEXT);
-CREATE TABLE IF NOT EXISTS escalations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_id TEXT NOT NULL, dp_id TEXT, level INTEGER, channel TEXT,
-    time TEXT, result TEXT, details TEXT, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT, updated_by TEXT);
-CREATE TABLE IF NOT EXISTS location_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, branch_id TEXT, partner_id TEXT, vehicle_id TEXT, lat REAL,
-    lng REAL, accuracy_m REAL, source TEXT);
-CREATE TABLE IF NOT EXISTS suggestions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, branch_id TEXT, kind TEXT, road_id TEXT, data TEXT,
-    status TEXT DEFAULT 'new', issue_id INTEGER, decided_by TEXT, decided_at TEXT);
-CREATE TABLE IF NOT EXISTS decisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, branch_id TEXT, issue_id INTEGER, decided_by TEXT,
-    decision TEXT, action_key TEXT, action_type TEXT, title TEXT, reason TEXT, features TEXT, p_accept REAL,
-    source TEXT DEFAULT 'app');
-CREATE TABLE IF NOT EXISTS audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, actor_user_id TEXT, action TEXT, target TEXT,
-    details_json TEXT, branch_id TEXT);
-"""
+SCHEMA = schema.sqlite_ddl()  # every table, from modules/schema.py (SQLAlchemy Core)
 TABLES = ["branches", "roles", "permissions", "role_permissions", "partners", "vehicles", "deliveries", "issues",
           "disruptions", "messages", "events", "meta", "users", "sessions", "otp_codes", "audit_log",
           "login_attempts", "drafts", "user_prefs", "assignment_history", "escalations",
-          "decisions", "location_log", "suggestions"]  # settings (incl. the learned model) survive a reset
+          "decisions", "location_log", "suggestions", "devices", "changes"]
+# settings (incl. the learned model) survive a reset
 BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events", "escalations",
                  "decisions", "location_log", "suggestions"]
 ACTIVE_DONE = ("delivered", "failed")
@@ -150,10 +77,13 @@ OLD_DB = DATA_DIR / "ripple.db"  # name used before the DEPORT rebrand – adopt
 
 
 def db_path():
-    """The database file: DB_PATH (Docker/hosting), else DEPORT_DB / RIPPLE_DB (older names), else data/deport.db."""
+    """The database file: DB_PATH (Docker/hosting), else DEPORT_DB / RIPPLE_DB (older names), else a sqlite:///…
+    DATABASE_URL, else data/deport.db. With PostgreSQL it only says where photos, voice notes and backups go."""
     custom = os.getenv("DB_PATH") or os.getenv("DEPORT_DB") or os.getenv("RIPPLE_DB")
     if custom:
         return Path(custom)
+    if db.sqlite_file():
+        return db.sqlite_file()
     if not DEFAULT_DB.exists() and OLD_DB.exists():
         adopt_old_db(OLD_DB, DEFAULT_DB)
     return DEFAULT_DB
@@ -178,6 +108,8 @@ def files_dir(name):
 
 
 def _open():
+    if db.is_postgres():
+        return db.connect_postgres()
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
@@ -199,6 +131,42 @@ def now_iso():
 _tx = threading.local()  # the open transaction of this thread (each Streamlit session runs in its own thread)
 
 
+def after_commit(action):
+    """Run action() once the current write is committed – right away when there is none. For network calls
+    (push) that must never run inside a transaction, or go out for a write that was rolled back."""
+    pending = getattr(_tx, "after", None)
+    if pending is None:
+        _run([action])
+    else:
+        pending.append(action)
+
+
+def _run(actions):
+    for action in actions:
+        try:
+            action()
+        except Exception:  # a failed notification never undoes the committed write
+            import logging
+
+            logging.getLogger("deport.store").exception("after-commit action failed")
+
+
+@contextmanager
+def _hooks():
+    outer = getattr(_tx, "after", None) is None
+    if outer:
+        _tx.after = []
+    try:
+        yield
+    except BaseException:
+        if outer:
+            _tx.after = None
+        raise
+    if outer:
+        actions, _tx.after = _tx.after, None
+        _run(actions)
+
+
 @contextmanager
 def connect():
     """The one connection helper: commit when the block succeeds, roll back when it raises."""
@@ -206,12 +174,16 @@ def connect():
     if shared is not None:  # inside transaction(): same connection, committed once at the end
         yield shared
         return
-    conn = _open()
-    try:
-        with conn:  # sqlite3: commit on success, rollback on exception
+    with _hooks():
+        conn = _open()
+        try:
             yield conn
-    finally:
-        conn.close()
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 @contextmanager
@@ -220,24 +192,25 @@ def transaction():
     if getattr(_tx, "conn", None) is not None:
         yield _tx.conn
         return
-    conn = _open()
-    conn.execute("BEGIN IMMEDIATE")
-    _tx.conn = conn
-    try:
-        yield conn
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
-    finally:
-        _tx.conn = None
-        conn.close()
+    with _hooks():
+        conn = _open()
+        conn.execute("BEGIN IMMEDIATE")  # SQLite: take the write lock now (PostgreSQL: skipped, rows lock)
+        _tx.conn = conn
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            _tx.conn = None
+            conn.close()
 
 
 def _bump(conn):
     """Every write bumps a version number; screens poll it to know when to refresh."""
     conn.execute("INSERT INTO meta(key, value) VALUES('version', '1') "
-                 "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1")
+                 "ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT)")
 
 
 def version():
@@ -268,6 +241,8 @@ def init_db():
 
 
 def _init_db():
+    if db.is_postgres():
+        return _init_postgres()
     with connect() as conn:
         conn.execute("PRAGMA journal_mode = WAL")  # readers never block the writer; stored in the file
         conn.executescript(SCHEMA)
@@ -302,6 +277,9 @@ def _init_db():
             _set_version(conn, 10)  # live GPS log and traffic / weather suggestions: tables from SCHEMA
         if current < 11:
             _migrate_v11(conn)
+        if current < 12:
+            _set_version(conn, 12)  # devices for push + the change feed behind the WebSockets: tables from SCHEMA
+        conn.executescript(schema.sqlite_index_ddl())  # after the upgrades, so every indexed column exists
         _fill_track_codes(conn)  # every delivery has a customer tracking link
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:  # data but no accounts: add the demo ones
             _seed_users(conn)
@@ -311,6 +289,34 @@ def _init_db():
         stamp = conn.execute("SELECT value FROM meta WHERE key = 'geometry_stamp'").fetchone()
         if not stamp or stamp["value"] != geometry.cache_stamp():  # the shapes file changed: reload it
             _seed_geometry(conn)
+
+
+def _init_postgres():
+    """PostgreSQL: Alembic creates or upgrades the tables; then the same seeding rules as SQLite."""
+    db.migrate()
+    with connect() as conn:
+        partner_ids = [r[0] for r in conn.execute("SELECT partner_id FROM partners")]
+        accounts = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if not partner_ids and not accounts:
+        reset_demo(backup=False)
+        return
+    with connect() as conn:
+        _fill_track_codes(conn)
+        if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
+            _seed_users(conn)
+        stamp = conn.execute("SELECT value FROM meta WHERE key = 'geometry_stamp'").fetchone()
+        if not stamp or stamp["value"] != geometry.cache_stamp():
+            _seed_geometry(conn)
+
+
+def _create_tables(conn, names=None):
+    """Create missing tables: SQLite from the generated DDL, PostgreSQL from the same SQLAlchemy metadata."""
+    if getattr(conn, "backend", "sqlite") == "postgresql":
+        tables = [schema.metadata.tables[n] for n in names] if names else None
+        schema.metadata.create_all(conn.sa, tables=tables)
+    else:
+        conn.executescript(SCHEMA)
+        conn.executescript(schema.sqlite_index_ddl())
 
 
 def _seed_reference(conn):
@@ -462,7 +468,7 @@ def _migrate_v11(conn):
 
 def _fill_track_codes(conn):
     """Give every delivery without one an unguessable tracking code (the public /track?code=... link)."""
-    if "track_code" not in _columns(conn, "deliveries"):
+    if getattr(conn, "backend", "sqlite") == "sqlite" and "track_code" not in _columns(conn, "deliveries"):
         return
     for (delivery_id,) in conn.execute("SELECT delivery_id FROM deliveries WHERE track_code IS NULL").fetchall():
         conn.execute("UPDATE deliveries SET track_code = ? WHERE delivery_id = ?", (secrets.token_urlsafe(9),
@@ -488,7 +494,10 @@ def _set_version(conn, version):
 
 
 def backup(reason="manual"):
-    """Copy the whole database to data/backups/deport-YYYYmmdd-HHMMSS-<reason>.db. Returns the path."""
+    """Copy the whole database to data/backups/deport-YYYYmmdd-HHMMSS-<reason>.db. Returns the path.
+    PostgreSQL: None – back it up with pg_dump or the host's snapshots (docs/PLATFORM.md)."""
+    if db.is_postgres():
+        return None
     target = files_dir("backups") / f"deport-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{reason}.db"
     source, copy = _open(), sqlite3.connect(target)
     try:
@@ -503,15 +512,16 @@ def reset_demo(backup=True):
     """Explicit reset only (Super Admin, after a confirm): back up first, then load the demo again
     (09:00, no issues, demo accounts restored). Returns the backup path (None when nothing was saved)."""
     saved = None
-    if backup and db_path().exists():
+    if backup and (db.is_postgres() or db_path().exists()):
         saved = globals()["backup"]("before-reset")
     data = load_all()
     partners = load_partners()
+    postgres = db.is_postgres()
     with connect() as conn:
         conn.execute("PRAGMA foreign_keys = OFF")  # dropping parent tables with FKs on would fail
         for table in TABLES:
-            conn.execute(f"DROP TABLE IF EXISTS {table}")
-        conn.executescript(SCHEMA)
+            conn.execute(f"DROP TABLE IF EXISTS {table}" + (" CASCADE" if postgres else ""))
+        _create_tables(conn, [t for t in TABLES if t in schema.metadata.tables])
         _seed_reference(conn)
         columns = ["partner_id", "name", "phone", "vehicle_id", "shift_start", "shift_end", "languages", "rating",
                    "status", "branch_id", "experience_months"]
@@ -547,9 +557,19 @@ def reset_demo(backup=True):
 
 
 # ---------------------------------------------------------------- reads
+def frame(conn, sql, params=()):
+    """A query's rows as a DataFrame, on an open connection of either backend."""
+    if getattr(conn, "backend", "sqlite") == "postgresql":
+        cursor = conn.execute(sql, params)
+        rows = cursor.fetchall()
+        return pd.DataFrame.from_records([tuple(r) for r in rows], columns=[d[0] for d in cursor.description or []],
+                                         coerce_float=True)
+    return pd.read_sql_query(sql, conn, params=params)
+
+
 def _df(sql, params=()):
     with connect() as conn:
-        return pd.read_sql_query(sql, conn, params=params)
+        return frame(conn, sql, params)
 
 
 def branches_df():
@@ -878,12 +898,12 @@ def get_setting(key, default=None):
 
 def all_settings():
     """Every saved app setting as {key: text}; {} before the database exists (never creates it)."""
-    if getattr(_tx, "conn", None) is None and not db_path().exists():
+    if getattr(_tx, "conn", None) is None and not db.is_postgres() and not db_path().exists():
         return {}
     try:
         with connect() as conn:
             return {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
-    except sqlite3.OperationalError:  # an old database before the settings table
+    except db.errors():  # an old database before the settings table (or PostgreSQL before its first migration)
         return {}
 
 
@@ -1002,6 +1022,8 @@ def add_message(text, to_partner=None, to_customer=None, to_phone=None, channel=
                            "text, branch_id, delivery_id, status) VALUES (?,?,?,?,?,?,?,?,?,?)",
                            (now_stamp(), issue_id, to_partner, to_customer, to_phone, channel, text, branch_id,
                             delivery_id, status or ("draft" if channel == "sms" else None)))
+        if to_partner:
+            emit(conn, "message", branch_id, to_partner, text=text, issue_id=issue_id)
         _bump(conn)
         return cur.lastrowid
 
@@ -1021,11 +1043,102 @@ def mark_messages_read(partner_id):
 
 
 def log_event(kind, text, issue_id=None, branch_id=None):
-    """Add a line to the branch history timeline."""
+    """Add a line to the branch history timeline (and to the live change feed)."""
     with connect() as conn:
         conn.execute("INSERT INTO events(created_at, kind, text, issue_id, branch_id) VALUES (?,?,?,?,?)",
                      (now_stamp(), kind, text, issue_id, branch_id))
+        emit(conn, "event", branch_id, event=kind, text=text, issue_id=issue_id)
         _bump(conn)
+
+
+def emit(conn, kind, branch_id=None, dp_id=None, **data):
+    """One row in the change feed the WebSockets stream: 'event' (history line, alert, plan), 'offer' (an order's
+    offer / escalation step, for that partner) or 'message' (a message to a partner). Same transaction as the
+    change itself, so a rolled-back change is never announced."""
+    conn.execute("INSERT INTO changes(time, branch_id, dp_id, kind, data) VALUES (?,?,?,?,?)",
+                 (now_iso(), branch_id, dp_id, kind, json.dumps(data, default=str)))
+
+
+def changes_since(last_id, branch_id=None, dp_id=None, limit=200):
+    """Change-feed rows after last_id, oldest first – a branch's (admin), one partner's, or all (None, None)."""
+    clauses, params = ["id > ?"], [int(last_id or 0)]
+    if branch_id:
+        clauses.append("branch_id = ?")
+        params.append(branch_id)
+    if dp_id:
+        clauses.append("dp_id = ?")
+        params.append(dp_id)
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM changes" + _where(clauses) + " ORDER BY id LIMIT ?",
+                            (*params, limit)).fetchall()
+    return [{**dict(r), "data": json.loads(r["data"] or "{}")} for r in rows]
+
+
+def last_change_id():
+    """The newest change-feed id (0 when empty) – a new WebSocket starts from here."""
+    with connect() as conn:
+        row = conn.execute("SELECT MAX(id) FROM changes").fetchone()
+    return int(row[0] or 0)
+
+
+def prune_changes(keep=5000):
+    """Keep the change feed small: only the newest `keep` rows."""
+    with connect() as conn:
+        conn.execute("DELETE FROM changes WHERE id <= (SELECT COALESCE(MAX(id), 0) FROM changes) - ?", (keep,))
+
+
+def register_device(user, token, platform="android"):
+    """A phone's push token (Firebase Cloud Messaging) for a signed-in user; a token moves to the newest user.
+    Returns how many phones the user has."""
+    token = str(token or "").strip()
+    if not 20 <= len(token) <= 4096:
+        raise ValueError("That is not a push token.")
+    with connect() as conn:
+        conn.execute("DELETE FROM devices WHERE token = ?", (token,))
+        conn.execute("INSERT INTO devices(user_id, dp_id, token, platform, created_at, last_seen) VALUES (?,?,?,?,?,?)",
+                     (user["user_id"], user.get("dp_id"), token, str(platform or "android")[:20], now_iso(),
+                      now_iso()))
+        return conn.execute("SELECT COUNT(*) FROM devices WHERE user_id = ?", (user["user_id"],)).fetchone()[0]
+
+
+def remove_device(token, user_id=None):
+    """Forget a push token (sign-out on the phone, or Firebase said it is no longer valid)."""
+    with connect() as conn:
+        conn.execute("DELETE FROM devices WHERE token = ?" + (" AND user_id = ?" if user_id else ""),
+                     (token, user_id) if user_id else (token,))
+
+
+def device_tokens(dp_id):
+    """Push tokens of a delivery partner's phones, newest first."""
+    with connect() as conn:
+        return [r["token"] for r in conn.execute("SELECT token FROM devices WHERE dp_id = ? ORDER BY id DESC",
+                                                 (dp_id,))]
+
+
+def nearest_vehicles(branch_id, lat, lng, limit=5, statuses=None):
+    """The branch's vehicles nearest to a point: [{vehicle_id, type, status, partner_id, name, km}], closest first.
+    PostGIS (geography distance, indexed) when the database has it; otherwise straight-line distance in Python."""
+    where, params = ["v.branch_id = ?", "v.current_lat IS NOT NULL", "v.current_lng IS NOT NULL"], [branch_id]
+    if statuses:
+        where.append(f"v.status IN ({','.join('?' * len(statuses))})")
+        params.extend(statuses)
+    base = ("SELECT v.vehicle_id, v.type, v.status, v.current_lat, v.current_lng, p.partner_id, p.name{km} "
+            "FROM vehicles v LEFT JOIN partners p ON p.vehicle_id = v.vehicle_id" + _where(where))
+    if db.has_postgis():
+        geo = "ST_SetSRID(ST_MakePoint(v.current_lng, v.current_lat), 4326)::geography"
+        here = "ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography"
+        sql = base.format(km=f", ST_Distance({geo}, {here}) / 1000.0 AS km") + f" ORDER BY {geo} <-> {here} LIMIT ?"
+        with connect() as conn:
+            rows = conn.execute(sql, (float(lng), float(lat), *params, float(lng), float(lat), int(limit))).fetchall()
+        found = [dict(r) for r in rows]
+    else:
+        from modules.data_loader import haversine_km
+
+        with connect() as conn:
+            rows = conn.execute(base.format(km=""), params).fetchall()
+        found = sorted(({**dict(r), "km": haversine_km(r["current_lat"], r["current_lng"], float(lat), float(lng))}
+                        for r in rows), key=lambda r: r["km"])[: int(limit)]
+    return [{**r, "km": round(float(r["km"]), 2)} for r in found]
 
 
 def audit(actor_user_id, action, target="", details=None, branch_id=None):

@@ -22,7 +22,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from modules import auth, escalation, issues, learning, operations, partner_scope, realtime, store, tracking
+from modules import auth, escalation, issues, learning, operations, partner_scope, pod, realtime, store, tracking
 from modules.data_loader import load_all
 from modules.parser import setting
 from services import voice_call
@@ -314,6 +314,27 @@ def decline(delivery_id: str, body: DeclineIn, user=Depends(partner_only)):
     except ValueError as error:
         raise HTTPException(409, str(error)) from error
     return {"ok": True, "offer": result}
+
+
+@app.post("/me/deliveries/{delivery_id}/pod/code")
+def send_pod_code(delivery_id: str, user=Depends(partner_only)):
+    """Send the customer a 4-digit delivery code (WhatsApp; in Demo mode the code comes back as demo_code)."""
+    return _forbidden(lambda: pod.send_code(user["dp_id"], user["branch_id"], delivery_id))
+
+
+@app.post("/me/deliveries/{delivery_id}/pod")
+async def deliver_with_proof(delivery_id: str, photo: UploadFile | None = File(None),
+                             signature: UploadFile | None = File(None), code: str | None = Form(None),
+                             note: str = Form(""), user=Depends(partner_only)):
+    """Delivered with proof: a photo plus the customer's code or a signature (PNG). Required for medical orders."""
+    photo_bytes = await photo.read() if photo else None
+    signature_bytes = await signature.read() if signature else None
+    try:
+        _forbidden(lambda: pod.complete(user["dp_id"], user["branch_id"], delivery_id, photo=photo_bytes,
+                                        signature=signature_bytes, code=code, note=note))
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
+    return {"ok": True, "delivered": delivery_id}
 
 
 @app.post("/me/deliveries/{delivery_id}/{step}")

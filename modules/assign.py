@@ -39,6 +39,7 @@ STAGE = {"unassigned": "Unassigned", "assigned": "New", "accepted": "Accepted", 
          "in_transit": "On the way", "pending": "On the way", "delivered": "Delivered", "failed": "Failed",
          "delayed": "Delayed", "rescheduled": "Rescheduled"}
 STAMP = {"accepted": "accepted_at", "picked_up": "picked_at", "delivered": "delivered_at"}
+PROOF_FOR = ("medical",)  # Delivered needs proof (modules/pod.py)
 CSV_COLUMNS = ["customer", "phone", "area", "category", "priority", "deadline", "package_size", "notes"]
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
@@ -455,6 +456,8 @@ def advance(dp_id, branch_id, delivery_id, to_status, note=""):
         expected = NEXT.get(row["status"])
         if expected != to_status:
             raise ValueError(f"Next step for {delivery_id}: {ACTION.get(expected, 'none')}.")
+        if to_status == "delivered" and row["priority"] in PROOF_FOR and not row["pod_at"]:
+            raise ValueError(f"{delivery_id} is medical: a photo and the customer's code or signature are needed.")
         fields = {"status": to_status}
         if to_status in STAMP:
             fields[STAMP[to_status]] = _now()

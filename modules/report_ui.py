@@ -1,7 +1,9 @@
 """'Report' flow shared by the partner app and the branch admin's 'Log issue'.
 
-1. tap one of 9 big tiles, record a voice note, or type     2. Check -> "We understood:"
-3. pick the road if no place was found                       4. Send -> the branch admin gets an alert + AI plan
+1. tap one of 9 big tiles, record a voice note, type, or add a photo   2. Check -> "We understood:"
+3. pick the road if no place was found                                   4. Send -> the branch admin gets an alert
+A photo is read by a vision model when a key is set (type + severity); otherwise the tiles say what it shows.
+Texts follow the partner's language (Tamil / English).
 
 Partners go through modules/partner_scope (only their own data, reports always filed as
 themselves); the branch admin's 'Log issue' uses the branch-scoped functions.
@@ -13,6 +15,7 @@ import streamlit as st
 
 from modules import issues, store, ui
 from modules.data_loader import load_all
+from modules.i18n import t
 from modules.voice import available_engines
 
 # (tile key, label, icon, quick type sent to the parser)
@@ -115,65 +118,81 @@ def report_form(partner_id, branch_id, prefix="report", source="partner"):
     picked_key = _key(prefix, "tile")
     picked = st.session_state.get(picked_key)
 
-    st.markdown("<p class='dp-h3' style='margin-bottom:8px'>What happened?</p>", unsafe_allow_html=True)
+    st.markdown(f"<p class='dp-h3' style='margin-bottom:8px'>{t('what_happened')}</p>", unsafe_allow_html=True)
     with st.container(horizontal=True, gap="small"):
-        for key, label, icon, _ in TILES:
-            if st.button(label, icon=icon, key=f"tile_{prefix}_{key}_{_round(prefix)}", width=92,
+        for key, _, icon, _ in TILES:
+            if st.button(t(f"tile_{key}"), icon=icon, key=f"tile_{prefix}_{key}_{_round(prefix)}", width=92,
                          type="primary" if picked == key else "secondary"):
                 st.session_state[picked_key] = None if picked == key else key
                 st.rerun()
     quick = QUICK_OF.get(picked)
-    audio = st.audio_input("Record voice", key=_key(prefix, "audio"))
-    text = st.text_area("Or type", key=_key(prefix, "text"), height=80,
+    audio = st.audio_input(t("record_voice"), key=_key(prefix, "audio"))
+    text = st.text_area(t("or_type"), key=_key(prefix, "text"), height=80,
                         placeholder="Avinashi road la accident, rendu mani neram block")
+    with st.expander(t("add_photo"), icon=":material/photo_camera:"):
+        how = st.segmented_control(t("photo"), ["camera", "upload"], key=_key(prefix, "photo_how"),
+                                   format_func=t, label_visibility="collapsed")
+        shot = (st.camera_input(t("take_photo"), key=_key(prefix, "camera")) if how == "camera" else
+                st.file_uploader(t("photo"), type=["jpg", "jpeg", "png", "webp"], key=_key(prefix, "upload"))
+                if how == "upload" else None)
+    photo = shot.getvalue() if shot else None
     saved_audio = _save_draft(prefix, user_id, picked, text, audio.getvalue() if audio else None)
     if saved_audio and not audio:
-        st.caption("Saved voice note")
+        st.caption(t("saved_voice"))
         st.audio(saved_audio)
     engines = available_engines()
-    st.caption(f"Tamil, English or both · {engines[0] if engines else 'type one line'} · draft auto-saved")
+    st.caption(t("report_hint", engine=engines[0] if engines else t("type_one_line")))
 
     # always clickable: a typed line is committed when the field loses focus, so no Ctrl+Enter is needed
-    if st.button("Check", type="primary", width="stretch", key=_key(prefix, "check"), icon=":material/fact_check:"):
-        if not (audio or saved_audio or text.strip() or quick):
-            st.warning("Tap a type, record or type.", icon=":material/info:")
+    if st.button(t("check"), type="primary", width="stretch", key=_key(prefix, "check"),
+                 icon=":material/fact_check:"):
+        if not (audio or saved_audio or text.strip() or quick or photo):
+            st.warning(t("tap_type"), icon=":material/info:")
             return None
         audio_bytes = audio.getvalue() if audio else (Path(saved_audio).read_bytes() if saved_audio else None)
         ui.pause_live_updates()  # keep the preview on screen until it is sent
-        with st.spinner("Listening…"):
-            result = preview_fn(text=text, audio=audio_bytes, quick_type=quick)
-        st.session_state[f"{prefix}_preview"] = {**result, "audio": audio_bytes, "quick": quick}
+        with st.spinner(t("listening")):
+            result = preview_fn(text=text, audio=audio_bytes, quick_type=quick, photo=photo)
+        st.session_state[f"{prefix}_preview"] = {**result, "audio": audio_bytes, "quick": quick,
+                                                 "photo_bytes": photo}
 
     preview = st.session_state.get(f"{prefix}_preview")
     if not preview:
         return None
     if preview["engine"] == "not understood":
-        st.warning("Voice not clear. Type one line.", icon=":material/hearing_disabled:")
+        st.warning(t("voice_unclear"), icon=":material/hearing_disabled:")
     problem = preview["problem"]
     if not problem:
+        if preview.get("photo_bytes"):  # a photo alone, and no vision model to read it
+            st.warning(t("photo_pick_type"), icon=":material/touch_app:")
         return None
 
     with ui.card(f"understood_{prefix}"):
-        st.markdown("<p class='dp-h3'>We understood:</p>", unsafe_allow_html=True)
+        st.markdown(f"<p class='dp-h3'>{t('we_understood')}</p>", unsafe_allow_html=True)
         if preview["transcript"]:
             st.markdown(f'<div class="dp-quote">“{escape(preview["transcript"])}”</div>', unsafe_allow_html=True)
+        if preview.get("photo_bytes"):
+            st.image(preview["photo_bytes"], width=180)
+            if preview.get("photo"):
+                st.caption(t("photo_seen", note=f"{preview['photo']['description']} ({preview['photo']['engine']})"))
         if problem.get("needs_location"):
             options = road_options_fn()  # own roads first for partners
             names = dict(options)
-            road = st.pills("Where?", [r for r, _ in options], format_func=names.get, key=_key(prefix, "road"))
+            road = st.pills(t("where"), [r for r, _ in options], format_func=names.get, key=_key(prefix, "road"))
             if road:
                 problem = issues.set_location(problem, road, {"roads": load_all()["roads"]})
                 preview["problem"] = problem
         st.markdown(f"<p style='font-size:16px;font-weight:650;margin:4px 0 12px'>{escape(problem['summary'])}</p>",
                     unsafe_allow_html=True)
         send, again = st.columns(2)
-        if send.button("Send", type="primary", width="stretch", icon=":material/send:", key=_key(prefix, "send"),
+        if send.button(t("send"), type="primary", width="stretch", icon=":material/send:", key=_key(prefix, "send"),
                        disabled=problem.get("needs_location", False)):
             issue_id = submit_fn(problem, transcript=preview["transcript"], engine=preview["engine"],
-                                 audio=preview["audio"], quick_type=preview["quick"])
+                                 audio=preview["audio"], quick_type=preview["quick"],
+                                 photo=preview.get("photo_bytes"))
             _clear(prefix)
             return issue_id
-        if again.button("Start again", width="stretch", key=_key(prefix, "again")):
+        if again.button(t("start_again"), width="stretch", key=_key(prefix, "again")):
             _clear(prefix)
             st.rerun()
     return None

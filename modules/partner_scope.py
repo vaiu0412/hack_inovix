@@ -139,13 +139,13 @@ def set_status(dp_id, branch_id, status):
     store.log_event("system", f"{partner['name']} is now {status.replace('_', ' ')}", branch_id=branch_id)
 
 
-def preview_issue(dp_id, branch_id, text="", audio=None, quick_type=None):
+def preview_issue(dp_id, branch_id, text="", audio=None, quick_type=None, photo=None):
     """What we understood from the partner's report (nothing is saved)."""
     _own(dp_id, branch_id)
-    return issues.preview(dp_id, text=text, audio=audio, quick_type=quick_type, branch_id=branch_id)
+    return issues.preview(dp_id, text=text, audio=audio, quick_type=quick_type, branch_id=branch_id, photo=photo)
 
 
-def report_issue(dp_id, branch_id, problem, transcript="", engine="typed", audio=None, quick_type=None):
+def report_issue(dp_id, branch_id, problem, transcript="", engine="typed", audio=None, quick_type=None, photo=None):
     """Send the partner's report to their branch. The reporter is always the logged-in partner."""
     partner, vehicle = _own(dp_id, branch_id)
     problem = {**problem, "reported_by": dp_id, "reporter_name": partner["name"]}
@@ -156,4 +156,4 @@ def report_issue(dp_id, branch_id, problem, transcript="", engine="typed", audio
         if problem["delivery_id"] not in own:
             raise PermissionError(f"Delivery {problem['delivery_id']} is not assigned to {dp_id}")
     return issues.submit(dp_id, problem, transcript=transcript, engine=engine, audio=audio,
-                         quick_type=quick_type, source="partner", branch_id=branch_id)
+                         quick_type=quick_type, source="partner", branch_id=branch_id, photo=photo)

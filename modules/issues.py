@@ -6,7 +6,9 @@ manager sees problem + recommendation together.
 """
 from modules import store
 from modules.parser import BASE_SEVERITY, DEFAULT_DURATION, parse_disruption
+from modules.parser import SEVERITIES as SEVERITY_ORDER
 from modules.voice import transcribe
+from services import vision
 
 QUICK_TYPES = {
     "accident": "Accident",
@@ -94,8 +96,8 @@ def set_location(problem, road_id, data):
     return problem
 
 
-def preview(partner_id, text="", audio=None, quick_type=None, branch_id=None):
-    """What we understood (nothing is saved). Returns transcript, engine and problem.
+def preview(partner_id, text="", audio=None, quick_type=None, branch_id=None, photo=None):
+    """What we understood (nothing is saved). Returns transcript, engine, problem and what the photo showed.
 
     Only the reporter's own branch is considered (the partner's branch, or the given branch for
     issues the branch admin logs for the operations desk).
@@ -109,12 +111,20 @@ def preview(partner_id, text="", audio=None, quick_type=None, branch_id=None):
             transcript, engine = heard["text"], heard["engine"]
         else:
             engine = "not understood"
+    seen = vision.analyse(photo, transcript) if photo else None  # None without a vision key: the tiles decide
+    if seen and seen["type"] != "unknown" and not quick_type:
+        quick_type = seen["type"]
     problem = understand(transcript, partner, data, quick_type) if (transcript or quick_type) else None
-    return {"transcript": transcript, "engine": engine, "problem": problem}
+    if problem and seen:
+        if SEVERITY_ORDER.index(seen["severity"]) > SEVERITY_ORDER.index(problem.get("severity", "medium")):
+            problem["severity"] = seen["severity"]
+        problem["photo_note"] = seen["description"]
+        problem["summary"] = summarize(problem)
+    return {"transcript": transcript, "engine": engine, "problem": problem, "photo": seen}
 
 
 def submit(partner_id, problem, transcript="", engine="typed", audio=None, quick_type=None, source="partner",
-           branch_id=None):
+           branch_id=None, photo=None):
     """Save the issue in the reporter's branch, log it, and let the AI prepare a plan. Returns the issue id."""
     from modules import operations  # avoid a circular import
 
@@ -122,7 +132,7 @@ def submit(partner_id, problem, transcript="", engine="typed", audio=None, quick
     if not branch:
         raise ValueError("An issue must belong to a branch")
     issue_id = store.add_issue(partner_id, text=transcript, audio=audio, quick_type=quick_type, source=source,
-                               branch_id=branch)
+                               branch_id=branch, photo=photo)
     store.update_issue(issue_id, transcript=transcript, transcript_engine=engine, problem=problem,
                        summary=problem["summary"])
     who = problem.get("reporter_name") or partner_id

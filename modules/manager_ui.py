@@ -1,6 +1,7 @@
 """Building blocks shared by the Branch Admin pages. Everything is scoped to the signed-in
 admin's branch: ctx["branch_id"] comes from the validated session only."""
 from html import escape
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -527,6 +528,10 @@ def alert_steps(ctx, issue):
                     unsafe_allow_html=True)
         if issue.get("audio"):
             st.audio(issue["audio"], format="audio/wav")
+        if issue.get("photo_path") and Path(issue["photo_path"]).exists():
+            st.image(issue["photo_path"], width=260)
+            if problem.get("photo_note"):
+                st.caption(f":material/photo_camera: {problem['photo_note']}")
         if issue.get("transcript"):
             st.markdown(f'<div class="dp-quote">“{escape(issue["transcript"])}”</div>', unsafe_allow_html=True)
     with understood, ui.card(f"understood_{issue['issue_id']}"):

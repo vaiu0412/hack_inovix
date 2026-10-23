@@ -1,11 +1,15 @@
-"""Deliveries: every order of the branch – filter, select a row for details; SMS sent to customers."""
+"""Deliveries: every order of the branch – filter, select a row for details (tracking link, proof of delivery);
+messages to customers."""
 from html import escape
+from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
 
-from modules import assign, escalation, escalation_ui, guards, predict, store, ui
+from modules import assign, escalation, escalation_ui, guards, operations, predict, store, ui
 from modules import manager_ui as mui
+from services import messaging
 
 guards.require_role("branch_admin")
 ui.header("Deliveries")
@@ -88,13 +92,34 @@ with panel_col, ui.card("delivery_panel"):
             st.markdown(f"<div style='margin:0 0 8px'>{ui.late_badge(likely[d['delivery_id']])}</div>",
                         unsafe_allow_html=True)
         st.link_button("Call customer", f"tel:{d['customer_phone']}", icon=":material/call:", width="stretch")
+        link = operations.tracking_link(d["delivery_id"])
+        st.markdown("<p class='dp-small' style='margin:8px 0 2px'>Tracking link</p>", unsafe_allow_html=True)
+        st.code(link, language=None, wrap_lines=True)
+        if isinstance(d.get("pod_at"), str):  # a missing value may come back as NaN
+            with st.expander("Proof of delivery", icon=":material/verified:", expanded=True):
+                how = {"code": "Photo + customer code", "signature": "Photo + signature", "photo": "Photo"}.get(
+                    d["pod_method"], d["pod_method"])
+                st.markdown(ui.kv([("Proof", escape(str(how or "—"))), ("At", escape(str(d["pod_at"])[11:16]))]),
+                            unsafe_allow_html=True)
+                for column, caption in (("pod_photo_path", "Photo"), ("pod_signature_path", "Signature")):
+                    if isinstance(d.get(column), str) and Path(d[column]).exists():
+                        st.image(d[column], caption=caption, width="stretch")
         mui.reassign_controls(ctx, d.to_dict())
         escalation_ui.timeline(d["delivery_id"], ctx["branch_id"])
 
 sms = store.customer_messages(branch_id=ctx["branch_id"])
-with st.expander(f"SMS sent ({len(sms)})", icon=":material/sms:"):
+with st.expander(f"Customer messages ({len(sms)})", icon=":material/sms:"):
     if len(sms):
-        st.dataframe(sms.rename(columns={"created_at": "Time", "issue_id": "Alert", "to_customer": "Customer",
-                                         "to_phone": "Phone", "text": "Message"}), hide_index=True, width="stretch")
+        shown = sms.assign(status=[messaging.label(s, p) for s, p in zip(sms["status"], sms["provider"])])
+        st.dataframe(shown.drop(columns=["provider"]).rename(columns={
+            "created_at": "Time", "issue_id": "Alert", "to_customer": "Customer", "to_phone": "Phone",
+            "text": "Message", "status": "Status"}), hide_index=True, width="stretch")
+        drafts = sms[sms["status"].fillna("draft") == "draft"]
+        if len(drafts):  # no WhatsApp set up: the admin sends the newest draft from their phone
+            draft = drafts.iloc[0]
+            st.caption(f"Demo mode · draft for {draft['to_customer']}")
+            st.code(draft["text"], language=None, wrap_lines=True)
+            st.link_button("Open in SMS", f"sms:{draft['to_phone']}?body={quote(draft['text'])}",
+                           icon=":material/sms:")
     else:
         st.caption("Sent when a plan is applied.")

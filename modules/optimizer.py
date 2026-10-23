@@ -363,7 +363,7 @@ def _messages(problem, routes, rule_plan):
         for s in stops:
             if s["eta_min"] - s["planned_min"] >= 15:
                 out.append({"kind": "customer", "customer": s["customer"], "phone": s["phone"],
-                            "to": f"{s['customer']} ({s['phone']})",
+                            "delivery_id": s["delivery_id"], "to": f"{s['customer']} ({s['phone']})",
                             "text": f"Hi {s['customer']}, your delivery {s['delivery_id']} is delayed due to "
                                     f"{'a problem on ' + cause if cause != 'the disruption' else cause}. "
                                     f"New ETA: {s['eta']}. Sorry for the trouble. – DEPORT Logistics"})

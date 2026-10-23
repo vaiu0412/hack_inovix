@@ -234,6 +234,7 @@ def recommend(impact, disruptions, data, polish=True, skip=()):
                         "kind": "customer",
                         "customer": row["customer"],
                         "phone": row["customer_phone"],
+                        "delivery_id": row["delivery_id"],
                         "text": _customer_sms(
                             row, eta_txt, f"We've moved it to a dedicated vehicle ({backup['reg_no']}). "
                         ),
@@ -354,7 +355,7 @@ def recommend(impact, disruptions, data, polish=True, skip=()):
             "risk_label": row["risk_label"],
             "messages": [{"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer",
                           "customer": row["customer"], "phone": row["customer_phone"],
-                          "text": _customer_sms(row, min_to_hhmm(new_eta))}],
+                          "delivery_id": row["delivery_id"], "text": _customer_sms(row, min_to_hhmm(new_eta))}],
         })
         if row["action"] == "":
             after.loc[idx, ["new_eta_min", "action"]] = [new_eta, "resequenced"]
@@ -381,7 +382,7 @@ def recommend(impact, disruptions, data, polish=True, skip=()):
             "risk_label": row["risk_label"],
             "messages": [{"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer",
                           "customer": row["customer"], "phone": row["customer_phone"],
-                          "text": _customer_sms(row, min_to_hhmm(eta))}],
+                          "delivery_id": row["delivery_id"], "text": _customer_sms(row, min_to_hhmm(eta))}],
         })
         if eta > row["deadline_min"]:  # customer agrees a new slot
             new_deadline = eta + RESCHEDULE_BUFFER_MIN

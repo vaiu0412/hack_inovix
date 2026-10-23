@@ -294,3 +294,13 @@ button:disabled { opacity: .45 !important; }
   .dp-count, [data-testid="stMainBlockContainer"], .dp-s-critical i, .dp-skel, .dp-offer .ring { animation: none !important; }
   [class*="st-key-card"], .dp-card, .dp-kpi { transition: none; }
 }
+
+/* public tracking page */
+.dp-track-head { display: flex; align-items: center; gap: 10px; margin: 4px 0 14px; font-weight: 800; letter-spacing: .12em;
+  color: var(--dp-text); }
+.dp-track-head svg { width: 30px; height: 30px; }
+.dp-steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 14px 0 6px; }
+.dp-steps > div { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--dp-muted); }
+.dp-steps i { display: block; height: 6px; border-radius: 4px; background: var(--dp-glass-strong); }
+.dp-steps .on i { background: var(--dp-primary); }
+.dp-steps .on span { color: var(--dp-text); font-weight: 600; }

@@ -16,9 +16,10 @@ from modules import learning, optimizer, store
 from modules.data_loader import min_to_hhmm
 from modules.impact import NO_RIPPLE_TYPES, compute_impact
 from modules.issues import set_location, summarize, type_label
-from modules.parser import call_llm, llm_available
+from modules.parser import call_llm, llm_available, setting
 from modules.recommender import action_key, recommend
 from modules.risk import score_risk
+from services import messaging
 
 RISK_COLUMNS = ["delivery_id", "customer", "address_area", "priority", "vehicle_id", "road_id", "road_name",
                 "planned_eta", "new_eta", "deadline", "delay_min", "slack_min", "will_miss", "risk_score",
@@ -197,6 +198,7 @@ def _single_stop_plan(problem, data):
                 "kind": "customer",
                 "customer": row["customer"],
                 "phone": row["customer_phone"],
+                "delivery_id": row["delivery_id"],
                 "text": f"Hi {row['customer']}, our partner could not reach you. We will try again at about "
                 f"{min_to_hhmm(new_eta)}. Reply with a better time if needed. – DEPORT Logistics",
             },
@@ -295,6 +297,7 @@ def accept(issue_id, decided_by="Manager", branch_id=None, choice="rules"):
     with store.transaction():
         partner_by_vehicle = {p["vehicle_id"]: p for p in store.partners_df(branch).to_dict("records")}
         changed = {"deliveries": 0, "partners_told": set(), "customers_told": 0}
+        outbox = []  # customer messages, sent after the commit (never a network call inside the transaction)
         if choice == "optimised":
             messages = _apply_optimised(plan, branch, partner_by_vehicle, changed)
         else:
@@ -309,8 +312,13 @@ def accept(issue_id, decided_by="Manager", branch_id=None, choice="rules"):
                                       branch_id=branch)
                     changed["partners_told"].add(partner["partner_id"])
             elif message.get("kind") == "customer":
-                store.add_message(message["text"], to_customer=message.get("customer"), to_phone=message.get("phone"),
-                                  channel="sms", issue_id=issue_id, branch_id=branch)
+                text = message["text"]
+                if message.get("delivery_id"):
+                    text += f" Track: {tracking_link(message['delivery_id'])}"
+                message_id = store.add_message(text, to_customer=message.get("customer"),
+                                               to_phone=message.get("phone"), channel="sms", issue_id=issue_id,
+                                               branch_id=branch, delivery_id=message.get("delivery_id"))
+                outbox.append((message_id, message.get("phone"), text))
                 changed["customers_told"] += 1
         reporter = issue.get("partner_id")
         if (
@@ -338,9 +346,18 @@ def accept(issue_id, decided_by="Manager", branch_id=None, choice="rules"):
             learning.record(issue, plan, "chosen" if choice == "optimised" else "not_chosen", decided_by,
                             actions=[{"action_type": "optimised_plan", "target": f"issue {issue_id}",
                                       "title": "Optimised plan (OR-Tools)"}])
+    for message_id, phone, body in outbox:
+        result = messaging.send(phone, body)  # WhatsApp when set up, else it stays a draft for the admin
+        store.set_message_status(message_id, result["status"], result["provider"])
     for other in store.list_issues(("analysed",), branch_id=branch):
         analyse(other["issue_id"])  # the branch changed, so its other plans must too
     return text
+
+
+def tracking_link(delivery_id):
+    """The public tracking link for a delivery: PUBLIC_APP_URL (or localhost) + /track?code=…"""
+    base = str(setting("PUBLIC_APP_URL", "http://localhost:8501")).rstrip("/")
+    return f"{base}/track?code={store.track_code(delivery_id)}"
 
 
 def _apply_rules(plan, branch, partner_by_vehicle, changed):

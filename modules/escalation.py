@@ -16,7 +16,7 @@ Times use the real clock (the delivery ETAs use the demo's 09:00 clock).
 from datetime import datetime
 
 from modules import store
-from services import voice_call
+from services import push, voice_call
 
 LIVE = ("sent", "seen", "ringing", "calling")  # still waiting for the partner
 NEEDS_ADMIN = ("no_response", "declined")
@@ -81,6 +81,15 @@ def _log(conn, delivery_id, dp_id, level, channel, result, branch_id, details=No
     conn.execute("INSERT INTO escalations(delivery_id, dp_id, level, channel, time, result, details, branch_id) "
                  "VALUES (?,?,?,?,?,?,?,?)", (delivery_id, dp_id, level, channel, _stamp(when), result, details,
                                               branch_id))
+    # live feed: the partner's phone and the branch's screens hear about every offer step at once (WebSockets)
+    store.emit(conn, "offer", branch_id, dp_id, delivery_id=delivery_id, level=level, channel=channel,
+               result=result)
+
+
+def log_step(delivery_id, dp_id, level, channel, result, branch_id, details=None):
+    """Add one step to an order's offer timeline from outside a transaction (e.g. 'Push sent')."""
+    with store.connect() as conn:
+        _log(conn, delivery_id, dp_id, level, channel, result, branch_id, details)
 
 
 def history(delivery_id, branch_id):
@@ -95,6 +104,9 @@ def offer(conn, delivery_id, dp_id, branch_id, when=None):
     conn.execute("UPDATE deliveries SET offer_status = 'sent', offered_at = ?, seen_at = NULL, escalation_level = 0 "
                  "WHERE delivery_id = ?", (_stamp(when), delivery_id))
     _log(conn, delivery_id, dp_id, 0, "app", "Sent", branch_id, when=when)
+    # level 0 also pushes to the partner's phone (when Firebase is set up and a phone is registered) – after the
+    # commit, so a rolled-back assignment never rings anyone
+    store.after_commit(lambda: push.offer_sent(dp_id, delivery_id, branch_id))
 
 
 def accepted(conn, delivery_id, dp_id, branch_id, channel="app"):

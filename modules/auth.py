@@ -145,8 +145,27 @@ def validate_session(token):
     """The signed-in user for a token, or None (unknown, expired, revoked, deactivated, branch off)."""
     if not isinstance(token, str) or not token:
         return None
+    return validate_session_hash(_sha(token))
+
+
+def session_hash(token):
+    """What the database keeps of a session token (the API puts it in its JWTs, never the token itself)."""
+    return _sha(token)
+
+
+def session_expires_at(token_hash):
+    """When a session ends (epoch seconds), or 0 when it doesn't exist."""
     with store.connect() as conn:
-        session = conn.execute("SELECT * FROM sessions WHERE token_hash = ?", (_sha(token),)).fetchone()
+        row = conn.execute("SELECT expires_at FROM sessions WHERE token_hash = ?", (token_hash,)).fetchone()
+    return float(row["expires_at"]) if row else 0.0
+
+
+def validate_session_hash(token_hash):
+    """Like validate_session, for a session known by its hash (a JWT's sid)."""
+    if not isinstance(token_hash, str) or not token_hash:
+        return None
+    with store.connect() as conn:
+        session = conn.execute("SELECT * FROM sessions WHERE token_hash = ?", (token_hash,)).fetchone()
         if not session or session["revoked"] or session["expires_at"] < time.time():
             return None
         row = conn.execute("SELECT u.*, b.is_active AS branch_active, b.name AS branch_name FROM users u "
@@ -159,11 +178,17 @@ def validate_session(token):
 
 def revoke_session(token):
     """End a session (sign out); the token stops working everywhere."""
-    if not token:
+    if token:
+        revoke_session_hash(_sha(token))
+
+
+def revoke_session_hash(token_hash):
+    """End a session known by its hash (sign-out from the API with a JWT)."""
+    if not token_hash:
         return
     with store.connect() as conn:
-        row = conn.execute("SELECT user_id FROM sessions WHERE token_hash = ?", (_sha(token),)).fetchone()
-        conn.execute("UPDATE sessions SET revoked = 1 WHERE token_hash = ?", (_sha(token),))
+        row = conn.execute("SELECT user_id FROM sessions WHERE token_hash = ?", (token_hash,)).fetchone()
+        conn.execute("UPDATE sessions SET revoked = 1 WHERE token_hash = ?", (token_hash,))
     if row:
         store.audit(row["user_id"], "logout")
 

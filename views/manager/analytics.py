@@ -104,7 +104,7 @@ with right:
                     gradient={0.2: "#1E3A8A", 0.5: "#2563EB", 0.8: "#60A5FA", 1.0: "#DBEAFE"}).add_to(m)
             m.fit_bounds([[p[0], p[1]] for p in spots], padding=(30, 30), max_zoom=14)
             st_folium(m, height=280, use_container_width=True, key="analytics_heat", returned_objects=[])
-            st.caption(f"{len(spots)} disruptions, weighted by severity.")
+            st.caption(f"{len(spots)} disruption{'' if len(spots) == 1 else 's'}, weighted by severity.")
 
 # ---------------------------------------------------------------- partner performance (live)
 heading("Partner performance", "groups", LIVE)

@@ -3,7 +3,8 @@ sees the alert and accepts the plan -> deliveries, routes, KPIs, history and DP1
 and nothing leaks to the other branches. Run after every change: it must always pass."""
 import pytest
 
-from modules import auth, operations, partner_scope as scope, store
+from modules import auth, operations, store
+from modules import partner_scope as scope
 
 
 @pytest.fixture()
@@ -14,7 +15,9 @@ def demo(tmp_path, monkeypatch):
 
 def report_accident():
     karthik, _ = auth.authenticate("DP102", "Partner@123")
-    seen = scope.preview_issue("DP102", karthik["branch_id"], text="avinasi rd la accident, full block, rendu mani neram aagum")
+    seen = scope.preview_issue(
+        "DP102", karthik["branch_id"], text="avinasi rd la accident, full block, rendu mani neram aagum"
+    )
     assert seen["problem"]["road_name"] == "Avinashi Road" and seen["problem"]["type"] == "accident"
     return scope.report_issue("DP102", karthik["branch_id"], seen["problem"], transcript=seen["transcript"])
 

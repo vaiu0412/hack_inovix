@@ -13,6 +13,7 @@ from modules.parser import setting
 
 
 def configured():
+    """True when SMTP host, user and password are set."""
     return bool(setting("SMTP_HOST") and setting("SMTP_USER") and setting("SMTP_PASSWORD"))
 
 
@@ -24,7 +25,9 @@ def send_code(to_email, code, purpose):
     message["Subject"] = f"DEPORT {'sign-in' if purpose == 'login' else 'password reset'} code: {code}"
     message["From"] = setting("SMTP_FROM") or setting("SMTP_USER")
     message["To"] = to_email
-    message.set_content(f"Your DEPORT code is {code}.\nIt expires in 5 minutes. If you didn't ask for it, ignore this email.")
+    message.set_content(
+        f"Your DEPORT code is {code}.\nIt expires in 5 minutes. If you didn't ask for it, ignore this email."
+    )
     host, port = setting("SMTP_HOST"), int(setting("SMTP_PORT", 587))
     try:
         if port == 465:

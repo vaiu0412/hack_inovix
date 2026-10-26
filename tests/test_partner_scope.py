@@ -1,7 +1,8 @@
 """A partner can only ever see and change their own data."""
 import pytest
 
-from modules import operations, partner_scope as scope, store
+from modules import operations, store
+from modules import partner_scope as scope
 
 
 @pytest.fixture()
@@ -31,8 +32,11 @@ def test_can_mark_own_delivery_once(db):
 
 
 def test_unknown_partner_is_refused(db):
-    for call in (lambda: scope.get_partner_deliveries("DP999", "CBE-E"), lambda: scope.get_partner_profile("manager", "CBE-E"),
-                 lambda: scope.mark_delivered("DP999", "CBE-E", "D01")):
+    for call in (
+        lambda: scope.get_partner_deliveries("DP999", "CBE-E"),
+        lambda: scope.get_partner_profile("manager", "CBE-E"),
+        lambda: scope.mark_delivered("DP999", "CBE-E", "D01"),
+    ):
         with pytest.raises(PermissionError):
             call()
 
@@ -67,7 +71,9 @@ def test_reassigned_parcel_appears_only_for_the_new_partner(db):
     assert "D10" not in set(scope.get_partner_deliveries("DP102", "CBE-E")["delivery_id"])   # dairy moved away
     assert "D10" in set(scope.get_partner_deliveries("DP106", "CBE-E")["delivery_id"])       # to the backup van
     assert any("D10" in m["text"] for m in scope.get_partner_notifications("DP106", "CBE-E"))
-    assert not any("D10" in m["text"] and "collect" in m["text"] for m in scope.get_partner_notifications("DP105", "CBE-S"))
+    assert not any(
+        "D10" in m["text"] and "collect" in m["text"] for m in scope.get_partner_notifications("DP105", "CBE-S")
+    )
 
 
 def test_route_is_your_own(db):

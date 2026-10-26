@@ -31,7 +31,9 @@ def karthik(client):
 def test_login_errors_and_logout(client):
     assert client.get("/health").json()["status"] == "ok"
     assert client.post("/login", json={"identifier": "east.admin@deport.in", "password": "x"}).status_code == 401
-    assert client.post("/login", json={"identifier": "superadmin@deport.in", "password": "Super@123"}).status_code == 403
+    assert (
+        client.post("/login", json={"identifier": "superadmin@deport.in", "password": "Super@123"}).status_code == 403
+    )
     for _ in range(4):
         client.post("/login", json={"identifier": "DP103", "password": "x"})
     assert client.post("/login", json={"identifier": "DP103", "password": "x"}).status_code == 429
@@ -87,11 +89,16 @@ def test_report_accept_stays_in_branch(client, east, karthik):
 
 
 def test_needs_location_then_edit_then_reject(client, east):
-    issue = client.post("/issues", json={"partner_id": "DP102", "text": "accident somewhere ahead"}, headers=east).json()
+    issue = client.post(
+        "/issues", json={"partner_id": "DP102", "text": "accident somewhere ahead"}, headers=east
+    ).json()
     assert issue["plan"]["kind"] == "needs_location"
     fixed = client.patch(f"/issues/{issue['issue_id']}", json={"road_id": "R8"}, headers=east).json()
     assert fixed["status"] == "analysed" and fixed["problem"]["road_id"] == "R8"
-    assert client.post(f"/issues/{issue['issue_id']}/reject", json={"reason": "Cleared"}, headers=east).json()["status"] == "rejected"
+    assert (
+        client.post(f"/issues/{issue['issue_id']}/reject", json={"reason": "Cleared"}, headers=east).json()["status"]
+        == "rejected"
+    )
     assert client.post("/issues", json={"partner_id": "DP104", "text": "x"}, headers=east).status_code == 403
 
 
@@ -99,3 +106,21 @@ def test_reset_is_super_admin_only(client, east):
     assert client.post("/demo/reset", headers=east).status_code == 403
     boss = token(client, "superadmin@deport.in", "Super@123", super_console=True)
     assert client.post("/demo/reset", headers=boss).json()["ok"]
+
+
+def test_proof_of_delivery(client, karthik):
+    murugan = token(client, "DP101", "Partner@123")
+    assert client.post("/me/deliveries/D06/delivered", headers=murugan).status_code == 409   # medical: proof first
+    assert client.post("/me/deliveries/D06/pod/code", headers=karthik).status_code == 403   # not his order
+    sent = client.post("/me/deliveries/D06/pod/code", headers=murugan).json()
+    assert sent["status"] == "draft" and len(sent["demo_code"]) == 4                        # Demo mode
+    east = token(client, "east.admin@deport.in", "Admin@123")
+    for path, who in (("/me/deliveries", murugan), ("/deliveries", east), ("/partners/DP101", east)):
+        assert "pod_code" not in client.get(path, headers=who).text                         # the hash never leaves
+    photo = ("door.png", b"\x89PNG\r\n\x1a\n" + bytes(32), "image/png")
+    assert client.post("/me/deliveries/D06/pod", headers=murugan, files={"photo": photo}).status_code == 409
+    reply = client.post("/me/deliveries/D06/pod", headers=murugan, files={"photo": photo},
+                        data={"code": sent["demo_code"], "note": "At reception"})
+    assert reply.status_code == 200 and reply.json() == {"ok": True, "delivered": "D06"}
+    assert client.post("/me/deliveries/D06/pod", headers=murugan, files={"photo": photo},
+                       data={"code": sent["demo_code"]}).status_code == 409                  # already delivered

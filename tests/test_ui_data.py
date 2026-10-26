@@ -10,8 +10,11 @@ from modules import geometry, live_map, store, ui
 from modules.data_loader import load_all, load_branches, load_partners, load_places
 
 ROOT = Path(__file__).resolve().parent.parent
-UI_FILES = [ROOT / "app.py", *sorted((ROOT / "views").rglob("*.py")),
-            *(ROOT / "modules" / name for name in ("ui.py", "login_ui.py", "manager_ui.py", "report_ui.py", "live_map.py"))]
+UI_FILES = [
+    ROOT / "app.py",
+    *sorted((ROOT / "views").rglob("*.py")),
+    *(ROOT / "modules" / name for name in ("ui.py", "login_ui.py", "manager_ui.py", "report_ui.py", "live_map.py")),
+]
 
 
 @pytest.fixture()

@@ -1,16 +1,19 @@
-"""Shared live data in SQLite – the single source of truth for every screen and the API.
+"""Shared live data in SQLite or PostgreSQL – the single source of truth for every screen and the API.
 
 Every operational row (partners, vehicles, deliveries, issues, disruptions, messages, events) carries
 a branch_id, and every read/write function here takes a branch_id to scope by (None = all branches,
 used only by internal jobs and the Super Admin summaries).
 
-Persistence: one file at a fixed absolute path, <project>/data/deport.db (set DEPORT_DB or RIPPLE_DB to use
-another file – the tests use a temporary one). Demo data is seeded ONLY when the database is empty; it is never
-reset automatically. "Reset demo" (Super Admin, with confirm) first saves a timestamped copy in data/backups/.
+Persistence: one file at a fixed absolute path, <project>/data/deport.db (set DB_PATH – or the older DEPORT_DB /
+RIPPLE_DB – to use another file; Docker uses /data/deport.db, the tests a temporary one). Demo data is seeded ONLY
+when the database is empty; it is never reset automatically. "Reset demo" (Super Admin, with confirm) first saves a
+timestamped copy in data/backups/.
 Signing out only revokes the session. Every write goes through one connection helper that commits or rolls back.
+PostgreSQL: set DATABASE_URL (modules/db.py); tables come from Alembic, the SQL stays the same.
 """
 import json
 import os
+import secrets
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -19,81 +22,34 @@ from pathlib import Path
 
 import pandas as pd
 
-from modules.data_loader import (DATA_DIR, NOW_MIN, hhmm_to_min, load_all, load_branches, load_partners,
-                                 nearest_place)
-from modules import geometry
+from modules import db, geometry, schema
+from modules.data_loader import DATA_DIR, hhmm_to_min, load_all, load_branches, load_partners, nearest_place
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 12
 ORDER_COLUMNS = {  # work assignment (v6): who created / assigned / handled an order, and when
     "created_by": "TEXT", "created_at": "TEXT", "assigned_at": "TEXT", "assigned_by": "TEXT", "accepted_at": "TEXT",
     "picked_at": "TEXT", "delivered_at": "TEXT", "package_size": "TEXT DEFAULT 'small'", "category": "TEXT",
     "notes": "TEXT DEFAULT ''", "proof_note": "TEXT DEFAULT ''"}
+OFFER_COLUMNS = {  # order offers and escalation (v7): sent -> seen -> ringing -> calling -> accepted / declined / ...
+    "offer_status": "TEXT", "offered_at": "TEXT", "seen_at": "TEXT", "escalation_level": "INTEGER DEFAULT 0"}
+PRODUCT_COLUMNS = {  # v11: photo reports, customer tracking link, proof of delivery, message delivery status
+    "issues": {"photo_path": "TEXT"},
+    "deliveries": {"track_code": "TEXT", "pod_method": "TEXT", "pod_at": "TEXT", "pod_photo_path": "TEXT",
+                   "pod_signature_path": "TEXT", "pod_code_hash": "TEXT", "pod_code_expires": "REAL",
+                   "pod_code_attempts": "INTEGER DEFAULT 0"},
+    "messages": {"status": "TEXT", "provider": "TEXT", "delivery_id": "TEXT"}}
 SEED_SIZE = {"bike": "small", "car": "small", "van": "medium", "truck": "large"}
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS branches (
-    branch_id TEXT PRIMARY KEY, name TEXT NOT NULL, city TEXT, area TEXT, address TEXT, lat REAL, lng REAL,
-    is_active INTEGER DEFAULT 1, created_at TEXT);
-CREATE TABLE IF NOT EXISTS roles (role_id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL);
-CREATE TABLE IF NOT EXISTS permissions (perm_id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT UNIQUE NOT NULL);
-CREATE TABLE IF NOT EXISTS role_permissions (role_id TEXT, perm_id INTEGER, PRIMARY KEY (role_id, perm_id));
-CREATE TABLE IF NOT EXISTS partners (
-    partner_id TEXT PRIMARY KEY, name TEXT, phone TEXT, vehicle_id TEXT, shift_start TEXT,
-    shift_end TEXT, languages TEXT, rating REAL, status TEXT, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS vehicles (
-    vehicle_id TEXT PRIMARY KEY, reg_no TEXT, type TEXT, status TEXT, current_lat REAL,
-    current_lng REAL, route_roads TEXT, capacity INTEGER, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS deliveries (
-    delivery_id TEXT PRIMARY KEY, customer TEXT, address_area TEXT, lat REAL, lng REAL,
-    vehicle_id TEXT, road_id TEXT, stop_order INTEGER, planned_eta TEXT, deadline TEXT,
-    priority TEXT, customer_phone TEXT, status TEXT DEFAULT 'in_transit', original_vehicle TEXT,
-    note TEXT DEFAULT '', branch_id TEXT, created_by TEXT, created_at TEXT, assigned_at TEXT, assigned_by TEXT,
-    accepted_at TEXT, picked_at TEXT, delivered_at TEXT, package_size TEXT DEFAULT 'small', category TEXT,
-    notes TEXT DEFAULT '', proof_note TEXT DEFAULT '');
-CREATE TABLE IF NOT EXISTS assignment_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, delivery_id TEXT NOT NULL, from_dp TEXT, to_dp TEXT, by_user TEXT,
-    reason TEXT, time TEXT, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS issues (
-    issue_id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, partner_id TEXT, source TEXT,
-    quick_type TEXT, text TEXT, audio BLOB, transcript TEXT, transcript_engine TEXT,
-    problem TEXT, summary TEXT, status TEXT, plan TEXT, decided_at TEXT, decision_note TEXT, branch_id TEXT,
-    audio_path TEXT);
-CREATE TABLE IF NOT EXISTS disruptions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER, data TEXT, active INTEGER DEFAULT 1,
-    created_at TEXT, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, issue_id INTEGER, to_partner TEXT,
-    to_customer TEXT, to_phone TEXT, channel TEXT, text TEXT, read INTEGER DEFAULT 0, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, kind TEXT, text TEXT, issue_id INTEGER, branch_id TEXT);
-CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS users (
-    user_id TEXT PRIMARY KEY, email TEXT UNIQUE, phone TEXT, display_name TEXT,
-    role_id TEXT NOT NULL REFERENCES roles(role_id), branch_id TEXT NULL REFERENCES branches(branch_id),
-    dp_id TEXT NULL REFERENCES partners(partner_id), password_hash TEXT NOT NULL, salt TEXT NOT NULL,
-    is_active INTEGER DEFAULT 1, failed_attempts INTEGER DEFAULT 0, locked_until REAL DEFAULT 0,
-    last_login TEXT, created_by TEXT, created_at TEXT);
-CREATE TABLE IF NOT EXISTS sessions (
-    token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at REAL, expires_at REAL,
-    remember_me INTEGER DEFAULT 0, revoked INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS otp_codes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, purpose TEXT NOT NULL, code_hash TEXT NOT NULL,
-    salt TEXT NOT NULL, expires_at REAL, used INTEGER DEFAULT 0, attempts INTEGER DEFAULT 0, created_at REAL);
-CREATE TABLE IF NOT EXISTS drafts (
-    user_id TEXT NOT NULL, form TEXT NOT NULL, tile TEXT, text TEXT, transcript TEXT, audio_path TEXT, updated_at TEXT,
-    PRIMARY KEY (user_id, form));
-CREATE TABLE IF NOT EXISTS user_prefs (
-    user_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT, updated_at TEXT, PRIMARY KEY (user_id, key));
-CREATE TABLE IF NOT EXISTS route_geometry (key TEXT PRIMARY KEY, points TEXT NOT NULL, source TEXT, meta TEXT);
-CREATE TABLE IF NOT EXISTS audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, time TEXT, actor_user_id TEXT, action TEXT, target TEXT,
-    details_json TEXT, branch_id TEXT);
-"""
+SCHEMA = schema.sqlite_ddl()  # every table, from modules/schema.py (SQLAlchemy Core)
 TABLES = ["branches", "roles", "permissions", "role_permissions", "partners", "vehicles", "deliveries", "issues",
           "disruptions", "messages", "events", "meta", "users", "sessions", "otp_codes", "audit_log",
-          "login_attempts", "drafts", "user_prefs", "assignment_history"]
-BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events"]
+          "login_attempts", "drafts", "user_prefs", "assignment_history", "escalations",
+          "decisions", "location_log", "suggestions", "devices", "changes"]
+# settings (incl. the learned model) survive a reset
+BRANCH_SCOPED = ["partners", "vehicles", "deliveries", "issues", "disruptions", "messages", "events", "escalations",
+                 "decisions", "location_log", "suggestions"]
 ACTIVE_DONE = ("delivered", "failed")
+PRIVATE_COLUMNS = ("pod_code_hash", "pod_code_expires", "pod_code_attempts")  # never leave the server
 JSON_FIELDS = {"problem", "plan"}
 OPEN_ISSUE_STATUSES = ("new", "analysed")
 
@@ -122,9 +78,13 @@ OLD_DB = DATA_DIR / "ripple.db"  # name used before the DEPORT rebrand – adopt
 
 
 def db_path():
-    custom = os.getenv("DEPORT_DB") or os.getenv("RIPPLE_DB")
+    """The database file: DB_PATH (Docker/hosting), else DEPORT_DB / RIPPLE_DB (older names), else a sqlite:///…
+    DATABASE_URL, else data/deport.db. With PostgreSQL it only says where photos, voice notes and backups go."""
+    custom = os.getenv("DB_PATH") or os.getenv("DEPORT_DB") or os.getenv("RIPPLE_DB")
     if custom:
         return Path(custom)
+    if db.sqlite_file():
+        return db.sqlite_file()
     if not DEFAULT_DB.exists() and OLD_DB.exists():
         adopt_old_db(OLD_DB, DEFAULT_DB)
     return DEFAULT_DB
@@ -149,6 +109,8 @@ def files_dir(name):
 
 
 def _open():
+    if db.is_postgres():
+        return db.connect_postgres()
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=10)
@@ -163,10 +125,47 @@ def now_stamp():
 
 
 def now_iso():
+    """Current local time as 'YYYY-MM-DD HH:MM:SS'."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 _tx = threading.local()  # the open transaction of this thread (each Streamlit session runs in its own thread)
+
+
+def after_commit(action):
+    """Run action() once the current write is committed – right away when there is none. For network calls
+    (push) that must never run inside a transaction, or go out for a write that was rolled back."""
+    pending = getattr(_tx, "after", None)
+    if pending is None:
+        _run([action])
+    else:
+        pending.append(action)
+
+
+def _run(actions):
+    for action in actions:
+        try:
+            action()
+        except Exception:  # a failed notification never undoes the committed write
+            import logging
+
+            logging.getLogger("deport.store").exception("after-commit action failed")
+
+
+@contextmanager
+def _hooks():
+    outer = getattr(_tx, "after", None) is None
+    if outer:
+        _tx.after = []
+    try:
+        yield
+    except BaseException:
+        if outer:
+            _tx.after = None
+        raise
+    if outer:
+        actions, _tx.after = _tx.after, None
+        _run(actions)
 
 
 @contextmanager
@@ -176,12 +175,16 @@ def connect():
     if shared is not None:  # inside transaction(): same connection, committed once at the end
         yield shared
         return
-    conn = _open()
-    try:
-        with conn:  # sqlite3: commit on success, rollback on exception
+    with _hooks():
+        conn = _open()
+        try:
             yield conn
-    finally:
-        conn.close()
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 @contextmanager
@@ -190,27 +193,29 @@ def transaction():
     if getattr(_tx, "conn", None) is not None:
         yield _tx.conn
         return
-    conn = _open()
-    conn.execute("BEGIN IMMEDIATE")
-    _tx.conn = conn
-    try:
-        yield conn
-        conn.commit()
-    except BaseException:
-        conn.rollback()
-        raise
-    finally:
-        _tx.conn = None
-        conn.close()
+    with _hooks():
+        conn = _open()
+        conn.execute("BEGIN IMMEDIATE")  # SQLite: take the write lock now (PostgreSQL: skipped, rows lock)
+        _tx.conn = conn
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            _tx.conn = None
+            conn.close()
 
 
 def _bump(conn):
     """Every write bumps a version number; screens poll it to know when to refresh."""
     conn.execute("INSERT INTO meta(key, value) VALUES('version', '1') "
-                 "ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1")
+                 "ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(meta.value AS INTEGER) + 1 AS TEXT)")
 
 
 def version():
+    """Data version number; it goes up on every write so screens know to refresh."""
     with connect() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = 'version'").fetchone()
     return int(row["value"]) if row else 0
@@ -225,9 +230,20 @@ def _where(clauses):
 
 
 # ---------------------------------------------------------------- setup, migration, seed
+_INIT_LOCK = threading.RLock()  # sessions are threads of one process: one at a time creates or upgrades the file
+
+
 def init_db():
     """Create the tables, upgrade older databases in place, and seed the demo ONLY when the database is empty.
-    Runs on every page load, so it must never change existing data."""
+    Runs on every page load, so it must never change existing data. Serialised: two sessions opening a brand-new
+    file at once would otherwise race on switching it to WAL ("database is locked")."""
+    with _INIT_LOCK:
+        _init_db()
+
+
+def _init_db():
+    if db.is_postgres():
+        return _init_postgres()
     with connect() as conn:
         conn.execute("PRAGMA journal_mode = WAL")  # readers never block the writer; stored in the file
         conn.executescript(SCHEMA)
@@ -252,6 +268,20 @@ def init_db():
             _migrate_v5(conn)
         if current < 6:
             _migrate_v6(conn)
+        if current < 7:
+            _migrate_v7(conn)
+        if current < 8:
+            _migrate_v8(conn)
+        if current < 9:
+            _set_version(conn, 9)  # decisions log: the table comes from SCHEMA
+        if current < 10:
+            _set_version(conn, 10)  # live GPS log and traffic / weather suggestions: tables from SCHEMA
+        if current < 11:
+            _migrate_v11(conn)
+        if current < 12:
+            _set_version(conn, 12)  # devices for push + the change feed behind the WebSockets: tables from SCHEMA
+        conn.executescript(schema.sqlite_index_ddl())  # after the upgrades, so every indexed column exists
+        _fill_track_codes(conn)  # every delivery has a customer tracking link
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:  # data but no accounts: add the demo ones
             _seed_users(conn)
             conn.execute("INSERT INTO audit_log(time, actor_user_id, action, target, details_json) VALUES (?,?,?,?,?)",
@@ -260,6 +290,34 @@ def init_db():
         stamp = conn.execute("SELECT value FROM meta WHERE key = 'geometry_stamp'").fetchone()
         if not stamp or stamp["value"] != geometry.cache_stamp():  # the shapes file changed: reload it
             _seed_geometry(conn)
+
+
+def _init_postgres():
+    """PostgreSQL: Alembic creates or upgrades the tables; then the same seeding rules as SQLite."""
+    db.migrate()
+    with connect() as conn:
+        partner_ids = [r[0] for r in conn.execute("SELECT partner_id FROM partners")]
+        accounts = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if not partner_ids and not accounts:
+        reset_demo(backup=False)
+        return
+    with connect() as conn:
+        _fill_track_codes(conn)
+        if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
+            _seed_users(conn)
+        stamp = conn.execute("SELECT value FROM meta WHERE key = 'geometry_stamp'").fetchone()
+        if not stamp or stamp["value"] != geometry.cache_stamp():
+            _seed_geometry(conn)
+
+
+def _create_tables(conn, names=None):
+    """Create missing tables: SQLite from the generated DDL, PostgreSQL from the same SQLAlchemy metadata."""
+    if getattr(conn, "backend", "sqlite") == "postgresql":
+        tables = [schema.metadata.tables[n] for n in names] if names else None
+        schema.metadata.create_all(conn.sa, tables=tables)
+    else:
+        conn.executescript(SCHEMA)
+        conn.executescript(schema.sqlite_index_ddl())
 
 
 def _seed_reference(conn):
@@ -303,7 +361,9 @@ def _migrate_v3(conn):
     partner_branch = dict(zip(load_partners()["partner_id"], load_partners()["branch_id"]))
     vehicles = load_all()["vehicles"]
     for partner_id, branch in partner_branch.items():
-        conn.execute("UPDATE partners SET branch_id = ? WHERE partner_id = ? AND branch_id IS NULL", (branch, partner_id))
+        conn.execute(
+            "UPDATE partners SET branch_id = ? WHERE partner_id = ? AND branch_id IS NULL", (branch, partner_id)
+        )
     for v in vehicles.itertuples():
         conn.execute("INSERT OR IGNORE INTO vehicles VALUES (?,?,?,?,?,?,?,?,?)",
                      (v.vehicle_id, v.reg_no, v.type, v.status, v.current_lat, v.current_lng,
@@ -380,10 +440,50 @@ def _migrate_v6(conn):
         if column not in have:
             conn.execute(f"ALTER TABLE deliveries ADD COLUMN {column} {kind}")
     conn.execute("UPDATE deliveries SET status = 'in_transit' WHERE status = 'pending'")
-    conn.execute("UPDATE deliveries SET package_size = COALESCE((SELECT CASE v.type WHEN 'van' THEN 'medium' "
-                 "WHEN 'truck' THEN 'large' ELSE 'small' END FROM vehicles v WHERE v.vehicle_id = deliveries.vehicle_id), "
-                 "'small') WHERE package_size IS NULL OR package_size = ''")
+    conn.execute(
+        "UPDATE deliveries SET package_size = COALESCE((SELECT CASE v.type WHEN 'van' THEN 'medium' "
+        "WHEN 'truck' THEN 'large' ELSE 'small' END FROM vehicles v WHERE v.vehicle_id = deliveries.vehicle_id), "
+        "'small') WHERE package_size IS NULL OR package_size = ''"
+    )
     _set_version(conn, 6)
+
+
+def _migrate_v7(conn):
+    """Order offers and escalation: offer columns on deliveries (the tables come from SCHEMA)."""
+    have = _columns(conn, "deliveries")
+    for column, kind in OFFER_COLUMNS.items():
+        if column not in have:
+            conn.execute(f"ALTER TABLE deliveries ADD COLUMN {column} {kind}")
+    _set_version(conn, 7)
+
+
+def _migrate_v11(conn):
+    """Photo reports, customer tracking links, proof of delivery and message delivery status."""
+    for table, columns in PRODUCT_COLUMNS.items():
+        have = _columns(conn, table)
+        for column, kind in columns.items():
+            if column not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+    _set_version(conn, 11)
+
+
+def _fill_track_codes(conn):
+    """Give every delivery without one an unguessable tracking code (the public /track?code=... link)."""
+    if getattr(conn, "backend", "sqlite") == "sqlite" and "track_code" not in _columns(conn, "deliveries"):
+        return
+    for (delivery_id,) in conn.execute("SELECT delivery_id FROM deliveries WHERE track_code IS NULL").fetchall():
+        conn.execute("UPDATE deliveries SET track_code = ? WHERE delivery_id = ?", (secrets.token_urlsafe(9),
+                                                                                    delivery_id))
+
+
+def _migrate_v8(conn):
+    """Partner experience in months (a feature of the delay model); the demo partners get their CSV values."""
+    if "experience_months" not in _columns(conn, "partners"):
+        conn.execute("ALTER TABLE partners ADD COLUMN experience_months INTEGER DEFAULT 0")
+    for p in load_partners().itertuples():
+        conn.execute("UPDATE partners SET experience_months = ? WHERE partner_id = ?",
+                     (int(p.experience_months), p.partner_id))
+    _set_version(conn, 8)
 
 
 def _set_version(conn, version):
@@ -395,7 +495,10 @@ def _set_version(conn, version):
 
 
 def backup(reason="manual"):
-    """Copy the whole database to data/backups/deport-YYYYmmdd-HHMMSS-<reason>.db. Returns the path."""
+    """Copy the whole database to data/backups/deport-YYYYmmdd-HHMMSS-<reason>.db. Returns the path.
+    PostgreSQL: None – back it up with pg_dump or the host's snapshots (docs/PLATFORM.md)."""
+    if db.is_postgres():
+        return None
     target = files_dir("backups") / f"deport-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{reason}.db"
     source, copy = _open(), sqlite3.connect(target)
     try:
@@ -410,19 +513,21 @@ def reset_demo(backup=True):
     """Explicit reset only (Super Admin, after a confirm): back up first, then load the demo again
     (09:00, no issues, demo accounts restored). Returns the backup path (None when nothing was saved)."""
     saved = None
-    if backup and db_path().exists():
+    if backup and (db.is_postgres() or db_path().exists()):
         saved = globals()["backup"]("before-reset")
     data = load_all()
     partners = load_partners()
+    postgres = db.is_postgres()
     with connect() as conn:
         conn.execute("PRAGMA foreign_keys = OFF")  # dropping parent tables with FKs on would fail
         for table in TABLES:
-            conn.execute(f"DROP TABLE IF EXISTS {table}")
-        conn.executescript(SCHEMA)
+            conn.execute(f"DROP TABLE IF EXISTS {table}" + (" CASCADE" if postgres else ""))
+        _create_tables(conn, [t for t in TABLES if t in schema.metadata.tables])
         _seed_reference(conn)
-        conn.executemany("INSERT INTO partners VALUES (?,?,?,?,?,?,?,?,?,?)",
-                         partners[["partner_id", "name", "phone", "vehicle_id", "shift_start", "shift_end",
-                                   "languages", "rating", "status", "branch_id"]].values.tolist())
+        columns = ["partner_id", "name", "phone", "vehicle_id", "shift_start", "shift_end", "languages", "rating",
+                   "status", "branch_id", "experience_months"]
+        conn.executemany(f"INSERT INTO partners({', '.join(columns)}) VALUES ({','.join('?' * len(columns))})",
+                         partners[columns].values.tolist())
         vehicles = data["vehicles"]
         conn.executemany("INSERT INTO vehicles VALUES (?,?,?,?,?,?,?,?,?)", [
             (v.vehicle_id, v.reg_no, v.type, v.status, v.current_lat, v.current_lng,
@@ -438,6 +543,7 @@ def reset_demo(backup=True):
               int(d.stop_order), d.planned_eta, d.deadline, d.priority, d.customer_phone, d.vehicle_id,
               branch_of[d.vehicle_id], now_iso(), now_iso(), SEED_SIZE.get(type_of[d.vehicle_id], "small"))
              for d in data["deliveries"].itertuples()])
+        _fill_track_codes(conn)
         _seed_users(conn)
         _seed_geometry(conn)
         for branch_id in partners["branch_id"].unique():
@@ -452,22 +558,56 @@ def reset_demo(backup=True):
 
 
 # ---------------------------------------------------------------- reads
+def frame(conn, sql, params=()):
+    """A query's rows as a DataFrame, on an open connection of either backend."""
+    if getattr(conn, "backend", "sqlite") == "postgresql":
+        cursor = conn.execute(sql, params)
+        rows = cursor.fetchall()
+        return pd.DataFrame.from_records([tuple(r) for r in rows], columns=[d[0] for d in cursor.description or []],
+                                         coerce_float=True)
+    return pd.read_sql_query(sql, conn, params=params)
+
+
 def _df(sql, params=()):
     with connect() as conn:
-        return pd.read_sql_query(sql, conn, params=params)
+        return frame(conn, sql, params)
 
 
 def branches_df():
+    """All branches."""
     return _df("SELECT * FROM branches ORDER BY branch_id")
 
 
 def get_branch(branch_id):
+    """One branch as a dict, or None."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM branches WHERE branch_id = ?", (branch_id,)).fetchone()
     return dict(row) if row else None
 
 
+def public(rows):
+    """Delivery rows without the proof-of-delivery secrets (DataFrame, dict or list of dicts)."""
+    if isinstance(rows, pd.DataFrame):
+        return rows.drop(columns=[c for c in PRIVATE_COLUMNS if c in rows.columns])
+    if isinstance(rows, dict):
+        return {k: v for k, v in rows.items() if k not in PRIVATE_COLUMNS}
+    return [public(r) for r in rows]
+
+
+def app_secret(name):
+    """A random secret made once and kept in the settings table, shared by the app and the API (never in code).
+    Safe when two processes ask at the same moment: the first one wins."""
+    saved = get_setting(name)
+    if not saved:
+        with connect() as conn:
+            conn.execute("INSERT INTO settings(key, value, updated_at, updated_by) VALUES (?,?,?,?) "
+                         "ON CONFLICT(key) DO NOTHING", (name, secrets.token_urlsafe(48), now_iso(), "system"))
+        saved = get_setting(name)
+    return saved
+
+
 def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
+    """Deliveries (optionally one vehicle, one branch, open only) with deadline/ETA in minutes."""
     clauses, params = [], []
     if vehicle_id:
         clauses.append("vehicle_id = ?")
@@ -477,7 +617,7 @@ def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
         params.append(branch_id)
     if not include_done:
         clauses.append("status NOT IN ('delivered', 'failed')")
-    df = _df("SELECT * FROM deliveries" + _where(clauses) + " ORDER BY vehicle_id, stop_order", params)
+    df = public(_df("SELECT * FROM deliveries" + _where(clauses) + " ORDER BY vehicle_id, stop_order", params))
     df["deadline_min"] = df["deadline"].apply(hhmm_to_min)
     # an unassigned order has no ETA yet: use its deadline so sorting and maths still work
     df["eta_min"] = [hhmm_to_min(eta) if isinstance(eta, str) and eta else due
@@ -486,7 +626,8 @@ def deliveries_df(vehicle_id=None, include_done=True, branch_id=None):
 
 
 def vehicles_df(branch_id=None):
-    df = _df("SELECT v.*, p.name AS driver, p.partner_id FROM vehicles v "
+    """Vehicles with their driver, optionally for one branch."""
+    df = _df("SELECT v.*, p.name AS driver, p.partner_id, p.experience_months FROM vehicles v "
              "LEFT JOIN partners p ON p.vehicle_id = v.vehicle_id"
              + (" WHERE v.branch_id = ?" if branch_id else "") + " ORDER BY v.vehicle_id",
              (branch_id,) if branch_id else ())
@@ -524,24 +665,42 @@ def partners_df(branch_id=None):
         own = deliveries[deliveries["vehicle_id"] == p.vehicle_id]
         todo = own[~own["status"].isin(["delivered", "failed"])].sort_values("eta_min")
         nxt = todo.iloc[0] if len(todo) else None
-        rows.append({
-            "partner_id": p.partner_id, "name": p.name, "phone": p.phone, "email": p.email,
-            "status": p.status if p.account_active else "off_duty", "account_active": bool(p.account_active),
-            "branch_id": p.branch_id, "vehicle_id": p.vehicle_id, "reg_no": p.reg_no,
-            "vehicle_type": p.vehicle_type, "area": nearest_place(p.lat, p.lng), "lat": p.lat, "lng": p.lng,
-            "assigned": len(own), "delivered": int((own["status"] == "delivered").sum()),
-            "pending": len(todo),
-            "urgent": int(todo["priority"].isin(["medical", "perishable"]).sum()),
-            "next_stop": f"{nxt['customer']}, {nxt['address_area']}" if nxt is not None else "—",
-            "next_eta": nxt["planned_eta"] if nxt is not None else "—",
-            "next_road": nxt["road_id"] if nxt is not None else (p.route_roads.split("|")[0] if p.route_roads else None),
-            "open_issues": int(open_by_partner.get(p.partner_id, 0)),
-            "shift": f"{p.shift_start}–{p.shift_end}", "languages": (p.languages or "").replace("|", ", "),
-            "rating": p.rating, "route_roads": p.route_roads or "",
-        })
+        rows.append(
+            {
+                "partner_id": p.partner_id,
+                "name": p.name,
+                "phone": p.phone,
+                "email": p.email,
+                "status": p.status if p.account_active else "off_duty",
+                "account_active": bool(p.account_active),
+                "branch_id": p.branch_id,
+                "vehicle_id": p.vehicle_id,
+                "reg_no": p.reg_no,
+                "vehicle_type": p.vehicle_type,
+                "area": nearest_place(p.lat, p.lng),
+                "lat": p.lat,
+                "lng": p.lng,
+                "assigned": len(own),
+                "delivered": int((own["status"] == "delivered").sum()),
+                "pending": len(todo),
+                "urgent": int(todo["priority"].isin(["medical", "perishable"]).sum()),
+                "next_stop": f"{nxt['customer']}, {nxt['address_area']}" if nxt is not None else "—",
+                "next_eta": nxt["planned_eta"] if nxt is not None else "—",
+                "next_road": nxt["road_id"]
+                if nxt is not None
+                else (p.route_roads.split("|")[0] if p.route_roads else None),
+                "open_issues": int(open_by_partner.get(p.partner_id, 0)),
+                "shift": f"{p.shift_start}–{p.shift_end}",
+                "languages": (p.languages or "").replace("|", ", "),
+                "rating": p.rating,
+                "route_roads": p.route_roads or "",
+                "experience_months": int(p.experience_months or 0),
+            }
+        )
     columns = ["partner_id", "name", "phone", "email", "status", "account_active", "branch_id", "vehicle_id", "reg_no",
                "vehicle_type", "area", "lat", "lng", "assigned", "delivered", "pending", "urgent", "next_stop",
-               "next_eta", "next_road", "open_issues", "shift", "languages", "rating", "route_roads"]
+               "next_eta", "next_road", "open_issues", "shift", "languages", "rating", "route_roads",
+               "experience_months"]
     return pd.DataFrame(rows, columns=columns)
 
 
@@ -553,6 +712,7 @@ def get_partner(partner_id, branch_id=None):
 
 
 def assignment_history(delivery_id=None, branch_id=None, limit=200):
+    """Who assigned which order to whom and why, newest first."""
     clauses, params = [], []
     if delivery_id:
         clauses.append("delivery_id = ?")
@@ -571,6 +731,7 @@ def _decode_issue(row):
 
 
 def get_issue(issue_id, branch_id=None):
+    """One issue with its JSON fields decoded, optionally only within a branch."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM issues WHERE issue_id = ?" + (" AND branch_id = ?" if branch_id else ""),
                            (issue_id, branch_id) if branch_id else (issue_id,)).fetchone()
@@ -578,6 +739,7 @@ def get_issue(issue_id, branch_id=None):
 
 
 def list_issues(statuses=None, partner_id=None, branch_id=None):
+    """Issues filtered by status, partner and branch, newest first."""
     clauses, params = [], []
     if statuses:
         clauses.append(f"status IN ({','.join('?' * len(statuses))})")
@@ -594,13 +756,27 @@ def list_issues(statuses=None, partner_id=None, branch_id=None):
 
 
 def active_disruptions(branch_id=None):
+    """Disruptions still in force (from accepted plans), optionally for one branch."""
     with connect() as conn:
-        rows = conn.execute("SELECT data FROM disruptions WHERE active = 1" + (" AND branch_id = ?" if branch_id else "")
-                            + " ORDER BY id", (branch_id,) if branch_id else ()).fetchall()
+        rows = conn.execute(
+            "SELECT data FROM disruptions WHERE active = 1"
+            + (" AND branch_id = ?" if branch_id else "")
+            + " ORDER BY id",
+            (branch_id,) if branch_id else (),
+        ).fetchall()
+    return [json.loads(r["data"]) for r in rows]
+
+
+def disruption_history(branch_id=None, limit=500):
+    """Every disruption (active or ended), newest first – for the Analytics heatmap."""
+    with connect() as conn:
+        rows = conn.execute("SELECT data FROM disruptions" + (" WHERE branch_id = ?" if branch_id else "")
+                            + " ORDER BY id DESC LIMIT ?", ((branch_id,) if branch_id else ()) + (limit,)).fetchall()
     return [json.loads(r["data"]) for r in rows]
 
 
 def messages_for(partner_id, limit=20):
+    """A partner's latest messages, newest first."""
     with connect() as conn:
         rows = conn.execute("SELECT * FROM messages WHERE to_partner = ? ORDER BY id DESC LIMIT ?",
                             (partner_id, limit)).fetchall()
@@ -608,20 +784,27 @@ def messages_for(partner_id, limit=20):
 
 
 def customer_messages(limit=50, branch_id=None):
-    return _df("SELECT created_at, issue_id, to_customer, to_phone, text FROM messages WHERE channel = 'sms'"
+    """Messages to customers (WhatsApp / SMS / draft), newest first."""
+    return _df("SELECT created_at, issue_id, to_customer, to_phone, text, status, provider FROM messages "
+               "WHERE channel = 'sms'"
                + (" AND branch_id = ?" if branch_id else "") + " ORDER BY id DESC LIMIT ?",
                ((branch_id,) if branch_id else ()) + (limit,))
 
 
 def events(limit=30, branch_id=None):
+    """The branch history timeline, newest first."""
     return _df("SELECT created_at, kind, text, issue_id FROM events" + (" WHERE branch_id = ?" if branch_id else "")
                + " ORDER BY id DESC LIMIT ?", ((branch_id,) if branch_id else ()) + (limit,))
 
 
 def audit_df(limit=200):
-    return _df("SELECT a.time, COALESCE(u.display_name, a.actor_user_id) AS actor, a.actor_user_id, a.action, "
-               "a.target, a.details_json, a.branch_id FROM audit_log a LEFT JOIN users u ON u.user_id = a.actor_user_id "
-               "ORDER BY a.id DESC LIMIT ?", (limit,))
+    """The audit log of sign-ins and admin actions, newest first."""
+    return _df(
+        "SELECT a.time, COALESCE(u.display_name, a.actor_user_id) AS actor, a.actor_user_id, a.action, "
+        "a.target, a.details_json, a.branch_id FROM audit_log a LEFT JOIN users u ON u.user_id = a.actor_user_id "
+        "ORDER BY a.id DESC LIMIT ?",
+        (limit,),
+    )
 
 
 def branch_summaries():
@@ -644,14 +827,19 @@ def branch_summaries():
 
 
 # ---------------------------------------------------------------- writes
-def add_issue(partner_id, text="", audio=None, quick_type=None, source="partner", branch_id=None, audio_path=None):
+def add_issue(partner_id, text="", audio=None, quick_type=None, source="partner", branch_id=None, audio_path=None,
+              photo=None):
+    """Save a new report (text, voice note and/or photo). Returns the issue id."""
     if audio and not audio_path:
         audio_path = str(save_voice(partner_id, audio))
+    photo_path = str(save_file("photos", partner_id, photo)) if photo else None
     with connect() as conn:
         cur = conn.execute(
-            "INSERT INTO issues(created_at, partner_id, source, quick_type, text, audio, audio_path, status, branch_id) "
-            "VALUES (?,?,?,?,?,?,?, 'new', ?)",
-            (now_stamp(), partner_id, source, quick_type, text, audio, audio_path, branch_id))
+            "INSERT INTO issues(created_at, partner_id, source, quick_type, text, audio, audio_path, status, "
+            "branch_id, photo_path) "
+            "VALUES (?,?,?,?,?,?,?, 'new', ?, ?)",
+            (now_stamp(), partner_id, source, quick_type, text, audio, audio_path, branch_id, photo_path),
+        )
         _bump(conn)
         return cur.lastrowid
 
@@ -664,7 +852,46 @@ def save_voice(owner, audio):
     return target
 
 
+def image_type(data):
+    """'png', 'jpg' or 'webp' from the first bytes of an image."""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return "jpg"
+
+
+def save_file(folder, owner, data):
+    """Image bytes -> data/<folder>/<owner>-<time>.<ext> next to the database. Returns the path."""
+    target = files_dir(folder) / f"{owner}-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.{image_type(data)}"
+    target.write_bytes(data)
+    return target
+
+
+def delivery_by_code(code):
+    """The delivery behind a public tracking code, or None."""
+    if not code:
+        return None
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM deliveries WHERE track_code = ?", (str(code),)).fetchone()
+    return dict(row) if row else None
+
+
+def track_code(delivery_id):
+    """The delivery's tracking code (made on first use)."""
+    with connect() as conn:
+        row = conn.execute("SELECT track_code FROM deliveries WHERE delivery_id = ?", (delivery_id,)).fetchone()
+        if row is None:
+            return None
+        if row["track_code"]:
+            return row["track_code"]
+        code = secrets.token_urlsafe(9)
+        conn.execute("UPDATE deliveries SET track_code = ? WHERE delivery_id = ?", (code, delivery_id))
+        return code
+
+
 def get_draft(user_id, form):
+    """A user's unsent form draft, or None."""
     with connect() as conn:
         row = conn.execute("SELECT * FROM drafts WHERE user_id = ? AND form = ?", (user_id, form)).fetchone()
     return dict(row) if row else None
@@ -681,11 +908,66 @@ def save_draft(user_id, form, tile=None, text="", transcript="", audio_path=None
 
 
 def clear_draft(user_id, form):
+    """Delete a user's draft once the form is sent."""
     with connect() as conn:
         conn.execute("DELETE FROM drafts WHERE user_id = ? AND form = ?", (user_id, form))
 
 
+def get_setting(key, default=None):
+    """One app setting (escalation times, weather …) as text, or the default."""
+    return all_settings().get(key, default)
+
+
+def all_settings():
+    """Every saved app setting as {key: text}; {} before the database exists (never creates it)."""
+    if getattr(_tx, "conn", None) is None and not db.is_postgres() and not db_path().exists():
+        return {}
+    try:
+        with connect() as conn:
+            return {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
+    except db.errors():  # an old database before the settings table (or PostgreSQL before its first migration)
+        return {}
+
+
+def set_setting(key, value, updated_by="system"):
+    """Save one app setting (kept when the demo data is reset)."""
+    with connect() as conn:
+        conn.execute("INSERT INTO settings(key, value, updated_at, updated_by) VALUES (?,?,?,?) "
+                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, "
+                     "updated_by = excluded.updated_by", (key, str(value), now_iso(), updated_by))
+        _bump(conn)
+
+
+def add_decisions(rows):
+    """Log admin decisions on recommendations (one row per recommendation): accepted, skipped, rejected …"""
+    columns = ["time", "branch_id", "issue_id", "decided_by", "decision", "action_key", "action_type", "title",
+               "reason", "features", "p_accept", "source"]
+    with connect() as conn:
+        conn.executemany(f"INSERT INTO decisions({', '.join(columns)}) VALUES ({','.join('?' * len(columns))})",
+                         [tuple(r.get(c) for c in columns) for r in rows])
+        _bump(conn)
+
+
+def decisions_df(branch_id=None, limit=5000):
+    """The decision log, newest first (features as JSON text), optionally for one branch."""
+    return _df("SELECT * FROM decisions" + (" WHERE branch_id = ?" if branch_id else "") + " ORDER BY id DESC LIMIT ?",
+               ((branch_id,) if branch_id else ()) + (limit,))
+
+
+def escalations_df(delivery_id=None, branch_id=None, limit=200):
+    """Offer and escalation steps (sent, seen, ringing, call, alert, answer), newest first."""
+    clauses, params = [], []
+    if delivery_id:
+        clauses.append("delivery_id = ?")
+        params.append(delivery_id)
+    if branch_id:
+        clauses.append("branch_id = ?")
+        params.append(branch_id)
+    return _df("SELECT * FROM escalations" + _where(clauses) + " ORDER BY id DESC LIMIT ?", (*params, limit))
+
+
 def get_prefs(user_id):
+    """A user's saved preferences (filters, last page)."""
     with connect() as conn:
         rows = conn.execute("SELECT key, value FROM user_prefs WHERE user_id = ?", (user_id,)).fetchall()
     return {r["key"]: json.loads(r["value"]) for r in rows}
@@ -696,12 +978,15 @@ def set_prefs(user_id, values):
     if not values:
         return
     with connect() as conn:
-        conn.executemany("INSERT INTO user_prefs(user_id, key, value, updated_at) VALUES (?,?,?,?) "
-                         "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-                         [(user_id, k, json.dumps(v), now_iso()) for k, v in values.items()])
+        conn.executemany(
+            "INSERT INTO user_prefs(user_id, key, value, updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            [(user_id, k, json.dumps(v), now_iso()) for k, v in values.items()],
+        )
 
 
 def update_issue(issue_id, **fields):
+    """Update issue fields (JSON fields are encoded) and bump the data version."""
     if not fields:
         return
     values = [json.dumps(v, default=str) if k in JSON_FIELDS and v is not None else v for k, v in fields.items()]
@@ -725,6 +1010,7 @@ def update_delivery(delivery_id, branch_id=None, **fields):
 
 
 def set_route(vehicle_id, road_ids, branch_id=None):
+    """Set a vehicle's route as an ordered list of road ids."""
     with connect() as conn:
         sql, params = "UPDATE vehicles SET route_roads = ? WHERE vehicle_id = ?", ["|".join(road_ids), vehicle_id]
         if branch_id:
@@ -736,37 +1022,145 @@ def set_route(vehicle_id, road_ids, branch_id=None):
 
 
 def set_partner_status(partner_id, status):
+    """Set a partner's status (normal, delayed, break …)."""
     with connect() as conn:
         conn.execute("UPDATE partners SET status = ? WHERE partner_id = ?", (status, partner_id))
         _bump(conn)
 
 
 def add_disruption(issue_id, disruption, branch_id=None):
+    """Record a disruption that is now in force."""
     with connect() as conn:
         conn.execute("INSERT INTO disruptions(issue_id, data, created_at, branch_id) VALUES (?,?,?,?)",
                      (issue_id, json.dumps(disruption, default=str), now_stamp(), branch_id))
         _bump(conn)
 
 
-def add_message(text, to_partner=None, to_customer=None, to_phone=None, channel="app", issue_id=None, branch_id=None):
+def add_message(text, to_partner=None, to_customer=None, to_phone=None, channel="app", issue_id=None, branch_id=None,
+                delivery_id=None, status=None):
+    """Queue a message to a partner (app) or a customer (SMS / WhatsApp). Returns its id."""
     with connect() as conn:
-        conn.execute("INSERT INTO messages(created_at, issue_id, to_partner, to_customer, to_phone, channel, text, "
-                     "branch_id) VALUES (?,?,?,?,?,?,?,?)",
-                     (now_stamp(), issue_id, to_partner, to_customer, to_phone, channel, text, branch_id))
+        cur = conn.execute("INSERT INTO messages(created_at, issue_id, to_partner, to_customer, to_phone, channel, "
+                           "text, branch_id, delivery_id, status) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                           (now_stamp(), issue_id, to_partner, to_customer, to_phone, channel, text, branch_id,
+                            delivery_id, status or ("draft" if channel == "sms" else None)))
+        if to_partner:
+            emit(conn, "message", branch_id, to_partner, text=text, issue_id=issue_id)
+        _bump(conn)
+        return cur.lastrowid
+
+
+def set_message_status(message_id, status, provider):
+    """Record how a customer message went out: sent / failed / draft, and by which provider."""
+    with connect() as conn:
+        conn.execute("UPDATE messages SET status = ?, provider = ? WHERE id = ?", (status, provider, message_id))
         _bump(conn)
 
 
 def mark_messages_read(partner_id):
+    """Mark all of a partner's messages as read."""
     with connect() as conn:
         conn.execute("UPDATE messages SET read = 1 WHERE to_partner = ? AND read = 0", (partner_id,))
         _bump(conn)
 
 
 def log_event(kind, text, issue_id=None, branch_id=None):
+    """Add a line to the branch history timeline (and to the live change feed)."""
     with connect() as conn:
         conn.execute("INSERT INTO events(created_at, kind, text, issue_id, branch_id) VALUES (?,?,?,?,?)",
                      (now_stamp(), kind, text, issue_id, branch_id))
+        emit(conn, "event", branch_id, event=kind, text=text, issue_id=issue_id)
         _bump(conn)
+
+
+def emit(conn, kind, branch_id=None, dp_id=None, **data):
+    """One row in the change feed the WebSockets stream: 'event' (history line, alert, plan), 'offer' (an order's
+    offer / escalation step, for that partner) or 'message' (a message to a partner). Same transaction as the
+    change itself, so a rolled-back change is never announced."""
+    conn.execute("INSERT INTO changes(time, branch_id, dp_id, kind, data) VALUES (?,?,?,?,?)",
+                 (now_iso(), branch_id, dp_id, kind, json.dumps(data, default=str)))
+
+
+def changes_since(last_id, branch_id=None, dp_id=None, limit=200):
+    """Change-feed rows after last_id, oldest first – a branch's (admin), one partner's, or all (None, None)."""
+    clauses, params = ["id > ?"], [int(last_id or 0)]
+    if branch_id:
+        clauses.append("branch_id = ?")
+        params.append(branch_id)
+    if dp_id:
+        clauses.append("dp_id = ?")
+        params.append(dp_id)
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM changes" + _where(clauses) + " ORDER BY id LIMIT ?",
+                            (*params, limit)).fetchall()
+    return [{**dict(r), "data": json.loads(r["data"] or "{}")} for r in rows]
+
+
+def last_change_id():
+    """The newest change-feed id (0 when empty) – a new WebSocket starts from here."""
+    with connect() as conn:
+        row = conn.execute("SELECT MAX(id) FROM changes").fetchone()
+    return int(row[0] or 0)
+
+
+def prune_changes(keep=5000):
+    """Keep the change feed small: only the newest `keep` rows."""
+    with connect() as conn:
+        conn.execute("DELETE FROM changes WHERE id <= (SELECT COALESCE(MAX(id), 0) FROM changes) - ?", (keep,))
+
+
+def register_device(user, token, platform="android"):
+    """A phone's push token (Firebase Cloud Messaging) for a signed-in user; a token moves to the newest user.
+    Returns how many phones the user has."""
+    token = str(token or "").strip()
+    if not 20 <= len(token) <= 4096:
+        raise ValueError("That is not a push token.")
+    with connect() as conn:
+        conn.execute("DELETE FROM devices WHERE token = ?", (token,))
+        conn.execute("INSERT INTO devices(user_id, dp_id, token, platform, created_at, last_seen) VALUES (?,?,?,?,?,?)",
+                     (user["user_id"], user.get("dp_id"), token, str(platform or "android")[:20], now_iso(),
+                      now_iso()))
+        return conn.execute("SELECT COUNT(*) FROM devices WHERE user_id = ?", (user["user_id"],)).fetchone()[0]
+
+
+def remove_device(token, user_id=None):
+    """Forget a push token (sign-out on the phone, or Firebase said it is no longer valid)."""
+    with connect() as conn:
+        conn.execute("DELETE FROM devices WHERE token = ?" + (" AND user_id = ?" if user_id else ""),
+                     (token, user_id) if user_id else (token,))
+
+
+def device_tokens(dp_id):
+    """Push tokens of a delivery partner's phones, newest first."""
+    with connect() as conn:
+        return [r["token"] for r in conn.execute("SELECT token FROM devices WHERE dp_id = ? ORDER BY id DESC",
+                                                 (dp_id,))]
+
+
+def nearest_vehicles(branch_id, lat, lng, limit=5, statuses=None):
+    """The branch's vehicles nearest to a point: [{vehicle_id, type, status, partner_id, name, km}], closest first.
+    PostGIS (geography distance, indexed) when the database has it; otherwise straight-line distance in Python."""
+    where, params = ["v.branch_id = ?", "v.current_lat IS NOT NULL", "v.current_lng IS NOT NULL"], [branch_id]
+    if statuses:
+        where.append(f"v.status IN ({','.join('?' * len(statuses))})")
+        params.extend(statuses)
+    base = ("SELECT v.vehicle_id, v.type, v.status, v.current_lat, v.current_lng, p.partner_id, p.name{km} "
+            "FROM vehicles v LEFT JOIN partners p ON p.vehicle_id = v.vehicle_id" + _where(where))
+    if db.has_postgis():
+        geo = "ST_SetSRID(ST_MakePoint(v.current_lng, v.current_lat), 4326)::geography"
+        here = "ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography"
+        sql = base.format(km=f", ST_Distance({geo}, {here}) / 1000.0 AS km") + f" ORDER BY {geo} <-> {here} LIMIT ?"
+        with connect() as conn:
+            rows = conn.execute(sql, (float(lng), float(lat), *params, float(lng), float(lat), int(limit))).fetchall()
+        found = [dict(r) for r in rows]
+    else:
+        from modules.data_loader import haversine_km
+
+        with connect() as conn:
+            rows = conn.execute(base.format(km=""), params).fetchall()
+        found = sorted(({**dict(r), "km": haversine_km(r["current_lat"], r["current_lng"], float(lat), float(lng))}
+                        for r in rows), key=lambda r: r["km"])[: int(limit)]
+    return [{**r, "km": round(float(r["km"]), 2)} for r in found]
 
 
 def audit(actor_user_id, action, target="", details=None, branch_id=None):

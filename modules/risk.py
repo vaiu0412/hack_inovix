@@ -20,6 +20,7 @@ LABEL_COLORS = {"Critical": "#ef4444", "High": "#f97316", "Medium": "#eab308", "
 
 
 def risk_label(score):
+    """Critical (≥75), High (≥50), Medium (≥25) or Low for a 0–100 risk score."""
     if score >= 75:
         return "Critical"
     if score >= 50:
@@ -30,12 +31,14 @@ def risk_label(score):
 
 
 def slack_pressure(slack_min):
+    """0–1 pressure from minutes of slack: 1 when already late, 0 when far from the deadline."""
     if slack_min < 0:
         return 1.0
     return max(0.0, 1 - slack_min / SLACK_HORIZON_MIN)
 
 
 def cascade_exposure(cascade_index):
+    """0–1 exposure from how many stops come before this one after the block."""
     return max(0.0, 1 - cascade_index / 3)
 
 
@@ -44,6 +47,7 @@ def _ordinal(n):
 
 
 def make_reason(row):
+    """Short reason for a risk score, e.g. 'misses 11:30 deadline by 20 min · medical · on the blocked road'."""
     if row["slack_min"] < 0:
         parts = [f"misses {row['deadline']} deadline by {-row['slack_min']} min"]
     else:

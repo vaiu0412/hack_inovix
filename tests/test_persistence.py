@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from modules import admin, auth, partner_scope as scope, store
+from modules import admin, auth, store
+from modules import partner_scope as scope
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -68,6 +69,7 @@ def test_startup_never_reseeds(db):
     assert resets() == 1
 
 
+@pytest.mark.sqlite_only
 def test_reset_is_explicit_and_backed_up_first(db):
     seen = scope.preview_issue("DP102", "CBE-E", text="trichy road flood")
     scope.report_issue("DP102", "CBE-E", seen["problem"], transcript=seen["transcript"])
@@ -88,6 +90,7 @@ def test_voice_notes_are_files_and_drafts_persist(db):
     assert store.get_draft("DP103", "partner_DP103") is None
 
 
+@pytest.mark.sqlite_only
 def test_database_settings(db):
     with store.connect() as conn:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -112,6 +115,17 @@ def test_default_database_is_an_absolute_project_path(monkeypatch):
     assert store.DEFAULT_DB.is_absolute() and store.DEFAULT_DB == ROOT / "data" / "deport.db"
 
 
+@pytest.mark.sqlite_only
+def test_db_path_setting_moves_the_database_and_its_files(tmp_path, monkeypatch):
+    """Docker / Render / Railway set DB_PATH to a file on a persistent disk."""
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "disk" / "deport.db"))
+    store.init_db()
+    assert store.db_path() == tmp_path / "disk" / "deport.db" and store.db_path().exists()
+    assert store.files_dir("voice") == tmp_path / "disk" / "voice"
+    assert auth.authenticate("DP102", "Partner@123")[0]["dp_id"] == "DP102"
+
+
+@pytest.mark.sqlite_only
 def test_prototype_database_is_backed_up_and_gets_accounts(db):
     """The first prototype stored partners P1-P6 and had no accounts; the live site kept that file."""
     with sqlite3.connect(db) as conn:
@@ -123,6 +137,7 @@ def test_prototype_database_is_backed_up_and_gets_accounts(db):
     assert any(p.name.endswith("before-reset.db") for p in store.files_dir("backups").iterdir())
 
 
+@pytest.mark.sqlite_only
 def test_data_without_accounts_gets_demo_accounts_and_keeps_data(db):
     store.update_delivery("D01", status="delivered")
     with sqlite3.connect(db) as conn:
@@ -131,3 +146,10 @@ def test_data_without_accounts_gets_demo_accounts_and_keeps_data(db):
     assert auth.authenticate("east.admin@deport.in", "Admin@123")[0]["branch_id"] == "CBE-E"
     assert store.deliveries_df().set_index("delivery_id").loc["D01", "status"] == "delivered"   # data kept
     assert resets() == 1
+
+
+def test_settings_read_before_the_database_exists_creates_nothing(tmp_path, monkeypatch):
+    """Reading a setting (e.g. the weather for the impact engine) must not need – or create – a database."""
+    monkeypatch.setenv("RIPPLE_DB", str(tmp_path / "missing" / "deport.db"))
+    assert store.get_setting("weather_now", "clear") == "clear" and store.all_settings() == {}
+    assert not (tmp_path / "missing" / "deport.db").exists()

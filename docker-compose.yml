@@ -1,0 +1,63 @@
+# docker compose up --build   →   app http://localhost:8501 (Super Admin: /console) · API http://localhost:8000/docs
+# Default: both use one SQLite file on the "deport-data" volume. PostgreSQL + PostGIS instead:
+#   docker compose --profile postgres up --build      (and set DATABASE_URL in .env, see below)
+# Optional keys go in .env (see .env.example). Photos, voice notes and backups always live on /data.
+services:
+  app:
+    build: .
+    image: deport:latest
+    ports:
+      - "8501:8501"
+    environment:
+      DB_PATH: /data/deport.db
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - deport-data:/data
+      # Google sign-in needs the [auth] section of secrets.toml – uncomment to use your local file:
+      # - ./.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro
+    restart: unless-stopped
+
+  # REST API + WebSockets + Twilio call webhooks + the offer timer when no page is open. Same data.
+  api:
+    build: .
+    image: deport:latest
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    environment:
+      DB_PATH: /data/deport.db
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - deport-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+    restart: unless-stopped
+
+  # PostgreSQL 16 + PostGIS (only with --profile postgres). Then put this in .env for app and api:
+  #   DATABASE_URL=postgresql://deport:deport@db:5432/deport
+  # The app creates and upgrades the tables itself (Alembic) and loads the demo on the first start.
+  db:
+    image: postgis/postgis:16-3.4
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: deport
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-deport}
+      POSTGRES_DB: deport
+    volumes:
+      - deport-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deport -d deport"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  deport-data:
+  deport-pg:

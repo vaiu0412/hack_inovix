@@ -1,12 +1,13 @@
 """Building blocks shared by the Branch Admin pages. Everything is scoped to the signed-in
 admin's branch: ctx["branch_id"] comes from the validated session only."""
 from html import escape
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-from modules import admin, assign, guards, issues, live_map, operations, store, ui
+from modules import admin, assign, guards, issues, live_map, operations, predict, store, tracking, ui
 from modules.data_loader import load_all
 from modules.graph_viz import build_graph, render_graph
 from modules.parser import SEVERITIES, llm_status
@@ -29,10 +30,12 @@ def context():
 
 
 def go(page_key):
+    """Open another Branch Admin page by its key."""
     st.switch_page(guards.BRANCH_PAGES[page_key])
 
 
 def short_road(name):
+    """Shorter road name for tight spaces ('Avinashi Road' -> 'Avinashi Rd')."""
     return str(name or "").replace(" Road", " Rd").replace(" Stretch", "")
 
 
@@ -90,6 +93,7 @@ def alert_banner(ctx):
 
 
 def at_risk_rows(ctx, limit=5):
+    """The most urgent at-risk deliveries for the 'At risk now' list."""
     rows = []
     drivers = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
     order = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
@@ -107,7 +111,46 @@ def at_risk_rows(ctx, limit=5):
     return "".join(html)
 
 
+def likely_late_card(ctx, limit=5):
+    """Proactive list from the delay model – before anyone reports a problem – with today's weather switch
+    (or the live OpenWeatherMap reading when a key is set)."""
+    from modules import realtime
+    from services import weather as weather_feed
+
+    weather = predict.weather_now()
+    live = realtime.weather_status() if weather_feed.configured() else None
+    if live:
+        st.caption(f":material/rainy: Live: {predict.WEATHER_LABEL[live['weather']]} · {live['rain_mm']} mm/h · "
+                   f"OpenWeatherMap {live['updated_at'][11:16]}")
+    else:
+        pick = st.segmented_control("Weather", list(predict.WEATHER), default=weather, key="weather_pick",
+                                    format_func=lambda w: {"clear": "☀️ Clear", "light_rain": "🌦️ Light rain",
+                                                           "heavy_rain": "⛈️ Heavy rain"}[w],
+                                    label_visibility="collapsed")
+        if pick and pick != weather:
+            predict.set_weather(ctx["actor"], pick)
+            st.rerun()
+    preds = predict.for_branch(ctx["branch_id"])
+    deliveries = store.deliveries_df(branch_id=ctx["branch_id"]).set_index("delivery_id")
+    drivers = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
+    top = sorted(preds.items(), key=lambda kv: -kv[1]["p_late"])[:limit]
+    late = sum(1 for p in preds.values() if p["p_late"] >= predict.LATE_AT)
+    st.markdown(f"<p class='dp-small' style='margin:4px 0 6px'>{late} of {len(preds)} open stops likely late"
+                f"</p>", unsafe_allow_html=True)
+    rows = []
+    for delivery_id, p in top:
+        d = deliveries.loc[delivery_id]
+        rows.append(f"<div class='dp-row'><div class='main'><b>{escape(delivery_id)} · {escape(d['customer'])}</b>"
+                    f"<small>{drivers.get(d['vehicle_id'], d['vehicle_id'])} · ETA {d['planned_eta']} · due "
+                    f"{d['deadline']} · +{max(p['delay_min'], 0):.0f} min</small><small>{ui.late_badge(p)}</small>"
+                    f"</div></div>")
+    st.markdown("".join(rows) or "<p class='dp-small'>No open stops.</p>", unsafe_allow_html=True)
+    st.caption(f":material/model_training: {predict.summary_line()}"
+               + ("" if live else " · weather is a demo setting"))
+
+
 def ai_status_line():
+    """One caption saying which AI engine is active, or rules mode without a key."""
     ai = llm_status()
     if not ai["available"]:
         st.caption(":material/smart_toy: AI: rules mode (no key).")
@@ -190,7 +233,7 @@ def live_map_view(ctx, height=620, key="live_map", filters=True):
     holder.markdown(ui.skeleton(height), unsafe_allow_html=True)
     fmap = live_map.build(view, deliveries, ctx["roads"], disruptions, detours, risk,
                           selected=st.session_state.get("selected_partner"), states=states,
-                          focus=True if focus else None, dark=ui.is_dark())
+                          focus=True if focus else None, trails=tracking.trails(ctx["branch_id"]))
     with holder.container():
         out = st_folium(fmap, height=height, use_container_width=True, key=key,
                         returned_objects=["last_object_clicked_tooltip"])
@@ -205,6 +248,7 @@ def live_map_view(ctx, height=620, key="live_map", filters=True):
 
 
 def partner_picker(ctx):
+    """Select box to focus the map and side panel on one partner."""
     partners = ctx["partners"]
     selected = st.session_state.get("selected_partner")
     options = partners["partner_id"].tolist()
@@ -233,7 +277,8 @@ def partner_panel(ctx, pid):
                     + f"<div style='margin-top:10px'>{ui.pill_html(state)}</div>", unsafe_allow_html=True)
         st.markdown(ui.kv([
             ("Vehicle", f"{escape(p['vehicle_id'])} · {escape(p['reg_no'])}"),
-            ("Location", escape(p["area"])),
+            ("Location", f"{escape(p['area'])}<br><small>"
+                         f"{escape(tracking.seen_text(tracking.last_seen(ctx['branch_id']).get(pid)))}</small>"),
             ("Deliveries", f"{p['delivered']} done · {p['pending']} left"),
             ("Next ETA", escape(str(p["next_eta"]))),
             ("Route", escape(route or "—")),
@@ -279,6 +324,7 @@ def partner_panel(ctx, pid):
 
 
 def add_basemap(m):
+    """Add the default basemap (no layer switcher) to a small map."""
     return live_map.add_tiles(m, switcher=False)
 
 
@@ -290,10 +336,16 @@ def order_card(ctx, order, found):
                     f"<p class='dp-small'>{escape(order['address_area'])} · {escape(order['priority'].capitalize())} · "
                     f"{escape(str(order.get('package_size') or 'small').capitalize())} · due {due}</p>",
                     unsafe_allow_html=True)
+        if order.get("offer_status") == "declined":
+            st.markdown(f"{ui.pill_html('critical', 'Declined')} <span class='dp-small'>back from the partner – "
+                        "pick someone else</span>", unsafe_allow_html=True)
         best = found[0] if found else None
         if best:
-            st.markdown(f"<div style='margin:6px 0 10px'>{ui.pill_html('normal' if best['feasible'] else 'delayed', 'Best')}"
-                        f" <span class='dp-small'>{escape(best['reason'])}</span></div>", unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='margin:6px 0 10px'>{ui.pill_html('normal' if best['feasible'] else 'delayed', 'Best')}"
+                f" <span class='dp-small'>{escape(best['reason'])}</span></div>",
+                unsafe_allow_html=True,
+            )
         else:
             st.markdown("<p class='dp-small'>No partner fits right now.</p>", unsafe_allow_html=True)
         go_col, pick_col = st.columns(2)
@@ -307,6 +359,7 @@ def order_card(ctx, order, found):
 
 
 def choose_partner_form(ctx, order, found, verb="Assign"):
+    """Form to pick a partner by hand for an order, with each option's reason."""
     options = [c for c in found if c["vehicle_id"] != order.get("vehicle_id")]
     if not options:
         st.caption("No other partner fits.")
@@ -354,8 +407,14 @@ def team_table(ctx):
     with st.container(horizontal=True, vertical_alignment="center", gap="small"):
         query = st.text_input("Search", placeholder="Search name, ID, area", label_visibility="collapsed",
                               icon=":material/search:", width=260)
-        status_pick = st.pills("Status", ["normal", "delayed", "critical", "available", "break"], selection_mode="multi",
-                               format_func=ui.status_text, label_visibility="collapsed", key="team_status")
+        status_pick = st.pills(
+            "Status",
+            ["normal", "delayed", "critical", "available", "break"],
+            selection_mode="multi",
+            format_func=ui.status_text,
+            label_visibility="collapsed",
+            key="team_status",
+        )
         kind_pick = st.pills("Vehicle", sorted(partners["vehicle_type"].unique()), selection_mode="multi",
                              format_func=lambda k: f"{ui.VEHICLE_EMOJI.get(k, '')} {k.title()}",
                              label_visibility="collapsed", key="team_kind")
@@ -392,8 +451,12 @@ def team_table(ctx):
 # ---------------------------------------------------------------- alerts
 @st.dialog("Log issue", width="large")
 def log_issue_dialog(ctx):
-    reporter = st.selectbox("For", ["OPS"] + ctx["partners"]["partner_id"].tolist(),
-                            format_func=lambda pid: "Ops desk" if pid == "OPS" else f"{pid} · {ctx['partner_names'][pid]}")
+    """Dialog for an admin to log an issue for a partner or the operations desk."""
+    reporter = st.selectbox(
+        "For",
+        ["OPS"] + ctx["partners"]["partner_id"].tolist(),
+        format_func=lambda pid: "Ops desk" if pid == "OPS" else f"{pid} · {ctx['partner_names'][pid]}",
+    )
     issue_id = report_form(reporter, ctx["branch_id"], prefix=f"mgr_{reporter}", source="manager")
     if issue_id:
         st.rerun()
@@ -416,15 +479,22 @@ def modify_form(ctx, issue, where="top"):
                                 format_func=str.capitalize)
         minutes = c4.number_input("Minutes", 0, 600, int(problem.get("duration_min") or 0), step=15)
         if st.form_submit_button("Save and re-plan", type="primary", width="stretch"):
-            operations.edit_problem(issue["issue_id"], branch_id=ctx["branch_id"], type=dtype, road_id=road,
-                                    severity=severity, duration_min=int(minutes))
+            operations.edit_problem(issue["issue_id"], branch_id=ctx["branch_id"],
+                                    decided_by=st.session_state.get("display_name", "Branch admin"),
+                                    type=dtype, road_id=road, severity=severity, duration_min=int(minutes))
             st.rerun()
 
 
 def before_after_rows(plan):
-    """Before -> After numbers for the success strip."""
+    """Before -> After numbers for the success strip (of the plan that was applied)."""
     ba = plan.get("before_after") or {}
     hit = max((plan.get("summary") or {}).get("affected_deliveries", 0), 1)
+    comparison = (plan.get("optimised") or {}).get("comparison") or {}
+    if plan.get("chosen") == "optimised" and comparison:
+        before, after = comparison["before"], comparison["optimised"]
+        return [("Missed deadlines", before["misses"], after["misses"]),
+                ("Avg delay", f"+{round(before['delay'] / hit)} min", f"+{round(after['delay'] / hit)} min"),
+                ("Total km", f"{before['km']:.0f}", f"{after['km']:.0f}")]
     if not ba:
         return []
     return [("Missed deadlines", ba["misses_before"], ba["misses_after"]),
@@ -458,6 +528,10 @@ def alert_steps(ctx, issue):
                     unsafe_allow_html=True)
         if issue.get("audio"):
             st.audio(issue["audio"], format="audio/wav")
+        if issue.get("photo_path") and Path(issue["photo_path"]).exists():
+            st.image(issue["photo_path"], width=260)
+            if problem.get("photo_note"):
+                st.caption(f":material/photo_camera: {problem['photo_note']}")
         if issue.get("transcript"):
             st.markdown(f'<div class="dp-quote">“{escape(issue["transcript"])}”</div>', unsafe_allow_html=True)
     with understood, ui.card(f"understood_{issue['issue_id']}"):
@@ -500,7 +574,7 @@ def alert_steps(ctx, issue):
             small = live_map.build(ctx["partners"], store.deliveries_df(branch_id=ctx["branch_id"]), ctx["roads"],
                                    [plan["disruption"]], plan.get("via_roads", []),
                                    dict(zip(risk["delivery_id"], risk["risk_label"])), states=ctx["states"],
-                                   focus=True, dark=ui.is_dark())
+                                   focus=True)
             st_folium(small, height=380, use_container_width=True, key=f"issue_map_{issue['issue_id']}",
                       returned_objects=[])
         with st.expander(f"Deliveries at risk ({len(risk)})", icon=":material/list:"):
@@ -523,23 +597,45 @@ def alert_steps(ctx, issue):
             st.markdown(f"<p class='dp-sub' style='margin-bottom:8px'>{escape(plan['headline'])}</p>",
                         unsafe_allow_html=True)
         cols = st.columns(2, gap="small")
+        can_skip = issue["status"] == "analysed" and plan.get("kind") == "ripple"
         for i, action in enumerate(actions[:6]):
-            cols[i % 2].markdown(ui.rec_card(action), unsafe_allow_html=True)
+            with cols[i % 2]:
+                st.markdown(ui.rec_card(action), unsafe_allow_html=True)
+                if can_skip:
+                    seen, skip = st.columns([3, 1], vertical_alignment="center")
+                    if action.get("p_source", "none") != "none":
+                        seen.caption(f":material/thumb_up: Likely taken {action['p_accept']:.0%}")
+                    if skip.button("Skip", key=f"skip_{issue['issue_id']}_{i}", type="tertiary",
+                                   icon=":material/block:", help="Not this one – the plan is rebuilt without it"):
+                        operations.skip_action(issue["issue_id"], action["action_id"],
+                                               decided_by=st.session_state.get("display_name", "Branch admin"),
+                                               branch_id=ctx["branch_id"])
+                        st.rerun()
         if len(actions) > 6:
             with st.expander(f"All {len(actions)} actions"):
                 st.markdown("".join(ui.rec_card(a) for a in actions[6:]), unsafe_allow_html=True)
+        if plan.get("skipped"):
+            note, undo = st.columns([3, 1], vertical_alignment="center")
+            note.caption(f":material/block: {len(plan['skipped'])} skipped – the plan was rebuilt without them.")
+            if issue["status"] == "analysed" and undo.button("Undo skips", key=f"unskip_{issue['issue_id']}",
+                                                             type="tertiary", icon=":material/undo:"):
+                operations.restore_skipped(issue["issue_id"], ctx["branch_id"])
+                st.rerun()
         with st.expander("Messages to send", icon=":material/sms:"):
             for action in actions:
                 for message in action.get("messages", []):
                     st.markdown(f"**To {escape(message['to'])}**")
                     st.code(message["text"], language=None, wrap_lines=True)
+    choice = plan_choice(ctx, issue, plan) if actions and plan.get("kind") == "ripple" else "rules"
     if issue["status"] == "analysed":
         with st.container(horizontal=True, gap="small"):
-            if st.button("Accept plan", type="primary", key=f"accept_{issue['issue_id']}", icon=":material/check_circle:"):
+            label = "Accept optimised plan" if choice == "optimised" else "Accept plan"
+            if st.button(label, type="primary", key=f"accept_{issue['issue_id']}", icon=":material/check_circle:"):
                 operations.accept(issue["issue_id"], decided_by=st.session_state.get("display_name", "Branch admin"),
-                                  branch_id=ctx["branch_id"])
+                                  branch_id=ctx["branch_id"], choice=choice)
                 st.session_state["last_applied"] = issue["issue_id"]
-                st.toast("Plan applied.", icon=":material/check_circle:")
+                st.toast("Optimised plan applied." if choice == "optimised" else "Plan applied.",
+                         icon=":material/check_circle:")
                 st.rerun()
             with st.popover("Modify", icon=":material/edit:"):
                 modify_form(ctx, issue, where="actions")
@@ -552,11 +648,80 @@ def alert_steps(ctx, issue):
                     st.rerun()
 
 
+def plan_choice(ctx, issue, plan):
+    """Rule-based plan vs the OR-Tools optimised plan: the numbers side by side and which one to apply."""
+    iid = issue["issue_id"]
+    opt = plan.get("optimised") or {}
+    if not opt.get("available"):
+        st.caption(":material/route: Optimised plan: install OR-Tools to compare one. The rule-based plan stays.")
+        return "rules"
+    if opt.get("status") != "ok":
+        st.caption(f":material/route: No optimised plan ({escape(str(opt.get('note') or opt.get('status')))}). "
+                   "The rule-based plan stays.")
+        return "rules"
+    cmp = opt["comparison"]
+    keys = ("misses", "delay", "km")
+    better = tuple(cmp["optimised"][k] for k in keys) < tuple(cmp["rules"][k] for k in keys)
+    with ui.card(f"compare_{iid}"):
+        st.markdown("<p class='dp-h3'>Rule-based or optimised?</p>", unsafe_allow_html=True)
+        head = "".join(f"<th>{h}</th>" for h in ("", "No action", "Rule plan", "Optimised"))
+        body = ""
+        for label, key, unit in (("Missed deadlines", "misses", ""), ("Total delay", "delay", " min"),
+                                 ("Total km", "km", " km")):
+            values = [cmp["before"][key], cmp["rules"][key], cmp["optimised"][key]]
+            best = min(values[1:])
+            cells = "".join(f"<td class='{'best' if i and v == best else ''}'>{v:g}{unit}</td>"
+                            for i, v in enumerate(values))
+            body += f"<tr><th>{label}</th>{cells}</tr>"
+        st.markdown(f"<table class='dp-compare'><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>",
+                    unsafe_allow_html=True)
+        if better:
+            rules, best = cmp["rules"], cmp["optimised"]
+            gains = [text for gain, text in (
+                (rules["misses"] - best["misses"], f"{rules['misses'] - best['misses']} fewer missed"),
+                (rules["delay"] - best["delay"], f"{rules['delay'] - best['delay']:g} min less delay"),
+                (rules["km"] - best["km"], f"{rules['km'] - best['km']:.0f} km less driving")) if gain > 0]
+            st.caption(f":material/lightbulb: Optimised is better here: {', '.join(gains)}.")
+        pick = st.segmented_control(  # the rule plan stays the default; the admin decides
+            "Apply", ["rules", "optimised"], default="rules", key=f"choice_{iid}",
+            format_func=lambda c: "Rule plan" if c == "rules" else "Optimised (OR-Tools)",
+            label_visibility="collapsed")
+        names = ctx["partner_names"]
+        by_vehicle = dict(zip(ctx["partners"]["vehicle_id"], ctx["partners"]["partner_id"]))
+        with st.expander("Optimised routes", icon=":material/route:"):
+            for vehicle_id, stops in opt["routes"].items():
+                if not stops:
+                    continue
+                who = names.get(by_vehicle.get(vehicle_id), vehicle_id)
+                path = " → ".join(f"{s['delivery_id']} {s['eta']}" + (" ↩" if s["from"] != vehicle_id else "")
+                                  for s in stops)
+                st.markdown(f"**{escape(vehicle_id)} · {escape(who)}** <span class='dp-small'>{escape(path)}"
+                            f"</span>", unsafe_allow_html=True)
+            if opt.get("moves"):
+                st.caption("↩ = parcel moved from another vehicle (handover).")
+            if opt.get("dropped"):
+                st.warning(f"Left out (back to the queue): {', '.join(opt['dropped'])}", icon=":material/warning:")
+        search = "guided search" if opt.get("thorough") else "quick search"
+        info, more = st.columns([3, 1.2], vertical_alignment="center")
+        info.caption(f":material/memory: OR-Tools · {search} · {opt.get('seconds', 0):.2f} s · "
+                     f"{len(opt.get('moves') or [])} parcels moved")
+        if issue["status"] == "analysed" and not opt.get("thorough") and more.button(
+                "Improve (5 s)", icon=":material/tune:", key=f"improve_{iid}", width="stretch"):
+            with st.spinner("Searching for 5 seconds…"):
+                operations.improve(iid, ctx["branch_id"])
+            st.rerun()
+    return pick or "rules"
+
+
 # ---------------------------------------------------------------- history
 def activity_feed(ctx, limit=60):
+    """Latest issues, AI results, decisions and deliveries as a timeline."""
     icons = {"issue": "report", "ai": "psychology", "decision": "gavel", "delivery": "package_2", "edit": "edit",
              "system": "settings"}
-    rows = [f"<div class='dp-row'><span class='dp-ico' style='color:var(--dp-muted)'>{icons.get(e['kind'], 'info')}"
-            f"</span><div class='main'>{escape(e['text'])}</div><div class='end dp-small'>{escape(e['created_at'])}</div>"
-            f"</div>" for e in store.events(limit, branch_id=ctx["branch_id"]).to_dict("records")]
+    rows = [
+        f"<div class='dp-row'><span class='dp-ico' style='color:var(--dp-muted)'>{icons.get(e['kind'], 'info')}"
+        f"</span><div class='main'>{escape(e['text'])}</div><div class='end dp-small'>{escape(e['created_at'])}</div>"
+        f"</div>"
+        for e in store.events(limit, branch_id=ctx["branch_id"]).to_dict("records")
+    ]
     st.markdown("".join(rows) or "<p class='dp-sub'>No activity yet.</p>", unsafe_allow_html=True)

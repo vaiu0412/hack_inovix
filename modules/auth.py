@@ -49,6 +49,7 @@ _DUMMY = hash_password("timing-equaliser")  # verify against something even for 
 
 
 def normalize(identifier):
+    """Lower-case an email/ID and collapse spaces, so ' DP102 ' matches 'dp102'."""
     return " ".join(str(identifier or "").split()).lower()
 
 
@@ -121,6 +122,7 @@ def authenticate(identifier, password, portal="workspace"):
 
 
 def get_user(user_id):
+    """One account with its branch name and status, or None."""
     with store.connect() as conn:
         row = conn.execute("SELECT u.*, b.is_active AS branch_active, b.name AS branch_name FROM users u "
                            "LEFT JOIN branches b ON b.branch_id = u.branch_id WHERE u.user_id = ?",
@@ -143,8 +145,27 @@ def validate_session(token):
     """The signed-in user for a token, or None (unknown, expired, revoked, deactivated, branch off)."""
     if not isinstance(token, str) or not token:
         return None
+    return validate_session_hash(_sha(token))
+
+
+def session_hash(token):
+    """What the database keeps of a session token (the API puts it in its JWTs, never the token itself)."""
+    return _sha(token)
+
+
+def session_expires_at(token_hash):
+    """When a session ends (epoch seconds), or 0 when it doesn't exist."""
     with store.connect() as conn:
-        session = conn.execute("SELECT * FROM sessions WHERE token_hash = ?", (_sha(token),)).fetchone()
+        row = conn.execute("SELECT expires_at FROM sessions WHERE token_hash = ?", (token_hash,)).fetchone()
+    return float(row["expires_at"]) if row else 0.0
+
+
+def validate_session_hash(token_hash):
+    """Like validate_session, for a session known by its hash (a JWT's sid)."""
+    if not isinstance(token_hash, str) or not token_hash:
+        return None
+    with store.connect() as conn:
+        session = conn.execute("SELECT * FROM sessions WHERE token_hash = ?", (token_hash,)).fetchone()
         if not session or session["revoked"] or session["expires_at"] < time.time():
             return None
         row = conn.execute("SELECT u.*, b.is_active AS branch_active, b.name AS branch_name FROM users u "
@@ -156,11 +177,18 @@ def validate_session(token):
 
 
 def revoke_session(token):
-    if not token:
+    """End a session (sign out); the token stops working everywhere."""
+    if token:
+        revoke_session_hash(_sha(token))
+
+
+def revoke_session_hash(token_hash):
+    """End a session known by its hash (sign-out from the API with a JWT)."""
+    if not token_hash:
         return
     with store.connect() as conn:
-        row = conn.execute("SELECT user_id FROM sessions WHERE token_hash = ?", (_sha(token),)).fetchone()
-        conn.execute("UPDATE sessions SET revoked = 1 WHERE token_hash = ?", (_sha(token),))
+        row = conn.execute("SELECT user_id FROM sessions WHERE token_hash = ?", (token_hash,)).fetchone()
+        conn.execute("UPDATE sessions SET revoked = 1 WHERE token_hash = ?", (token_hash,))
     if row:
         store.audit(row["user_id"], "logout")
 
@@ -171,10 +199,6 @@ def otp_by_email():
     from modules import mailer
 
     return mailer.configured()
-
-
-def sms_configured():  # older name, kept for callers/tests
-    return otp_by_email()
 
 
 def _mask(email):
@@ -251,6 +275,7 @@ def password_problem(password):
 
 
 def set_password(user_id, new_password, actor_user_id=None):
+    """Set a new password after checking its strength; signs the account out everywhere."""
     problem = password_problem(new_password)
     if problem:
         raise ValueError(problem)
@@ -276,6 +301,7 @@ def reset_password_with_otp(identifier, code, new_password):
 
 # ---------------------------------------------------------------- permissions + scope
 def has_permission(user, code):
+    """True if the user's role has this permission code."""
     if not user:
         return False
     with store.connect() as conn:
@@ -285,6 +311,7 @@ def has_permission(user, code):
 
 
 def require_permission(user, code):
+    """Raise PermissionError unless the user's role has this permission code."""
     if not has_permission(user, code):
         raise PermissionError(f"{ROLE_LABELS.get((user or {}).get('role'), 'This account')} cannot {code}")
 
@@ -340,9 +367,13 @@ if __name__ == "__main__":
 
     os.environ["RIPPLE_DB"] = str(Path(tempfile.mkdtemp()) / "auth.db")
     store.init_db()
-    for ident, pw, portal in [("east.admin@deport.in", "Admin@123", "workspace"), (" dp102 ", "Partner@123", "workspace"),
-                              ("superadmin@deport.in", "Super@123", "workspace"),
-                              ("superadmin@deport.in", "Super@123", "super"), ("dp102", "nope", "workspace")]:
+    for ident, pw, portal in [
+        ("east.admin@deport.in", "Admin@123", "workspace"),
+        (" dp102 ", "Partner@123", "workspace"),
+        ("superadmin@deport.in", "Super@123", "workspace"),
+        ("superadmin@deport.in", "Super@123", "super"),
+        ("dp102", "nope", "workspace"),
+    ]:
         user, error = authenticate(ident, pw, portal)
         print(f"{ident:24} {portal:9} ->", (user["role"], user["branch_id"]) if user else error)
     token = create_session("DP102", remember_me=True)

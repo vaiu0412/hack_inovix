@@ -1,0 +1,32 @@
+name: deport_partner
+description: DEPORT delivery partner app – orders, offers, reports, proof of delivery, live updates.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+  flutter: ">=3.27.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.2
+  web_socket_channel: ^3.0.1
+  flutter_secure_storage: ^9.2.2
+  shared_preferences: ^2.3.2
+  connectivity_plus: ^6.0.5
+  firebase_core: ^3.6.0
+  firebase_messaging: ^15.1.3
+  geolocator: ^13.0.1
+  image_picker: ^1.1.2
+  record: ^5.1.2
+  path_provider: ^2.1.4
+  url_launcher: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

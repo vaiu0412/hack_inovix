@@ -30,8 +30,9 @@ BRANCH_PAGES = {
     "deliveries": "views/manager/deliveries.py",
     "disruptions": "views/manager/disruptions.py",
     "history": "views/manager/history.py",
+    "insights": "views/manager/insights.py",
+    "analytics": "views/manager/analytics.py",
 }
-MANAGER_PAGES = BRANCH_PAGES  # the old manager pages are the branch admin pages now
 PARTNER_PAGES = {
     "today": "views/partner/today.py",
     "deliveries": "views/partner/my_deliveries.py",
@@ -119,12 +120,8 @@ def flush_cookie_ops():
 
 # ---------------------------------------------------------------- guards
 def current_user():
+    """The signed-in user of this browser session, or None."""
     return st.session_state.get("user") if st.session_state.get("authenticated") else None
-
-
-def current_role():
-    user = current_user()
-    return user["role"] if user else None
 
 
 def _deny():
@@ -133,12 +130,14 @@ def _deny():
 
 
 def require_login():
+    """Stop the page with 'Access denied' unless someone is signed in."""
     if not current_user():
         _deny()
     return current_user()
 
 
 def require_role(*roles):
+    """Stop the page unless the signed-in user has one of these roles."""
     user = current_user()
     if not user or user["role"] not in roles:
         _deny()
@@ -146,6 +145,7 @@ def require_role(*roles):
 
 
 def require_permission(code):
+    """Stop the page unless the signed-in user has this permission."""
     user = require_login()
     if not auth.has_permission(user, code):
         _deny()

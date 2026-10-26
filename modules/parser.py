@@ -74,6 +74,7 @@ def _contains(text, word):
 
 
 def detect_type(text):
+    """Disruption type from keywords (English, Tamil, Tanglish), or None."""
     for dtype, words in TYPE_KEYWORDS:
         if any(_contains(text, w) for w in words):
             return dtype
@@ -111,12 +112,6 @@ def locate(text):
     return {**{k: best[k] for k in ["road_id", "road_name", "place", "alias", "score"]}, "suggestions": suggestions}
 
 
-def match_road(text, roads=None):
-    """Find the road mentioned in the text. Returns (road_id, road_name, alias) or (None, None, None)."""
-    found = locate(text)
-    return found["road_id"], found["road_name"], found["alias"] or None
-
-
 def match_vehicle(text, vehicles):
     """Find a vehicle by reg number, id (V3) or driver name."""
     reg = REG_RE.search(text)
@@ -136,6 +131,7 @@ def match_vehicle(text, vehicles):
 
 
 def detect_severity(text, dtype, duration, duration_given):
+    """Severity from the type's base level, strong words and the duration."""
     level = SEVERITIES.index(BASE_SEVERITY.get(dtype, "medium"))
     if any(_contains(text, w) for w in STRONG_WORDS):
         level += 1
@@ -149,6 +145,7 @@ def detect_severity(text, dtype, duration, duration_given):
 
 
 def parse_rules(text, data):
+    """Understand a report with rules only (no AI key needed): type, road, duration, severity."""
     raw = text or ""
     low = raw.lower()
     dtype = detect_type(low)
@@ -215,6 +212,7 @@ def offline():
 
 
 def llm_available():
+    """True when an AI key is set and the app is not in offline mode."""
     return not offline() and bool(setting("GEMINI_API_KEY") or setting("GROQ_API_KEY"))
 
 
@@ -322,6 +320,7 @@ def _post_json(url, body, headers, timeout):
 
 
 def parse_llm(text, data):
+    """Understand a report with the LLM (Gemini or Groq), asking for JSON only."""
     from modules.data_loader import load_places
 
     roads = "\n".join(f"- {r.road_id}: {r.name}" for r in data["roads"].itertuples())

@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- DEPORT geolocation component: sends the phone's position to Streamlit every `interval_s` seconds.
+     Plain HTML/JS using Streamlit's component messages (no build step, no package). -->
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0">
+<script>
+  function send(type, data) {
+    window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, data), "*");
+  }
+  function setValue(value) { send("streamlit:setComponentValue", {value: value, dataType: "json"}); }
+
+  var timer = null;
+  function read() {
+    if (!navigator.geolocation) { setValue({error: "unsupported"}); return; }
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        setValue({lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy,
+                  ts: pos.timestamp});
+      },
+      function (err) { setValue({error: err.code === 1 ? "denied" : "unavailable", ts: Date.now()}); },
+      {enableHighAccuracy: true, maximumAge: 15000, timeout: 20000}
+    );
+  }
+  window.addEventListener("message", function (event) {
+    if (!event.data || event.data.type !== "streamlit:render") { return; }
+    var every = Math.max(10, (event.data.args && event.data.args.interval_s) || 30) * 1000;
+    if (timer === null) {        // the iframe stays mounted across reruns: start once
+      read();
+      timer = setInterval(read, every);
+    }
+  });
+  send("streamlit:componentReady", {apiVersion: 1});
+  send("streamlit:setFrameHeight", {height: 0});
+</script>
+</body>
+</html>

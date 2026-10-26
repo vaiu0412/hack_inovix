@@ -4,20 +4,22 @@
 - candidates / best_match: rank the branch's partners for one order, with a short reason
   ("Arun · 1.2 km away · 3/8 load · 🚐 fits"). Scored by distance from the partner's position or
   stops (haversine), load vs. capacity, vehicle fits the package, partner status (never critical,
-  on break or off), same-route bonus and whether the deadline can still be met.
+  on break or off), same-route bonus and whether the deadline can still be met – using the delay model's
+  predicted extra minutes for that partner, road, hour and weather (modules/predict.py).
 - assign / reassign / unassign: ONE transaction each – vehicle, status, ETA and stop order
   (cheapest insertion), later stops' ETAs, partner notification, history, activity log.
 - auto_assign_plan / apply_plan: every unassigned order, respecting capacity; applied in one go.
 - advance: the partner's flow assigned -> accepted -> picked_up -> in_transit -> delivered (no skipping).
+- every assignment starts an offer that escalates until the partner answers (see modules/escalation.py).
 
 Everything is scoped to one branch; the branch always comes from the signed-in user.
 """
 import re
-from datetime import datetime
+from datetime import date, datetime
 
 import pandas as pd
 
-from modules import store
+from modules import escalation, predict, store
 from modules.data_loader import NOW_MIN, haversine_km, hhmm_to_min, min_to_hhmm
 from modules.places import find_area
 from modules.recommender import DROP_MIN, travel_min
@@ -30,7 +32,6 @@ VEHICLE_EMOJI = {"bike": "🏍️", "car": "🚗", "van": "🚐", "truck": "🚚
 CATEGORIES = ("Parcel", "Food", "Medicine", "Groceries", "Documents", "Electronics")
 PRIORITIES = ("medical", "perishable", "express", "standard")
 REASONS = ("Partner busy", "Vehicle issue", "Closer partner", "Customer request", "Other")
-FLOW = ("assigned", "accepted", "picked_up", "in_transit", "delivered")
 NEXT = {"assigned": "accepted", "accepted": "picked_up", "picked_up": "in_transit", "in_transit": "delivered",
         "pending": "delivered", "delayed": "delivered", "rescheduled": "in_transit"}
 ACTION = {"accepted": "Accept", "picked_up": "Picked up", "in_transit": "Start", "delivered": "Delivered"}
@@ -38,6 +39,7 @@ STAGE = {"unassigned": "Unassigned", "assigned": "New", "accepted": "Accepted", 
          "in_transit": "On the way", "pending": "On the way", "delivered": "Delivered", "failed": "Failed",
          "delayed": "Delayed", "rescheduled": "Rescheduled"}
 STAMP = {"accepted": "accepted_at", "picked_up": "picked_at", "delivered": "delivered_at"}
+PROOF_FOR = ("medical",)  # Delivered needs proof (modules/pod.py)
 CSV_COLUMNS = ["customer", "phone", "area", "category", "priority", "deadline", "package_size", "notes"]
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
@@ -98,10 +100,26 @@ def create_order(actor, customer, phone, area, category, priority, deadline, pac
         conn.execute(
             "INSERT INTO deliveries(delivery_id, customer, address_area, lat, lng, vehicle_id, road_id, stop_order, "
             "planned_eta, deadline, priority, customer_phone, status, original_vehicle, branch_id, created_by, "
-            "created_at, package_size, category, notes) VALUES (?,?,?,?,?,NULL,?,0,NULL,?,?,?,'unassigned',NULL,?,?,?,?,?,?)",
-            (delivery_id, str(customer).strip(), place["place"], place["lat"], place["lng"], place["road_id"], deadline,
-             priority, str(phone).strip(), branch, actor["user_id"], _now(), package_size, category,
-             str(notes or "").strip()))
+            "created_at, package_size, category, notes) "
+            "VALUES (?,?,?,?,?,NULL,?,0,NULL,?,?,?,'unassigned',NULL,?,?,?,?,?,?)",
+            (
+                delivery_id,
+                str(customer).strip(),
+                place["place"],
+                place["lat"],
+                place["lng"],
+                place["road_id"],
+                deadline,
+                priority,
+                str(phone).strip(),
+                branch,
+                actor["user_id"],
+                _now(),
+                package_size,
+                category,
+                str(notes or "").strip(),
+            ),
+        )
         store.log_event("delivery", f"New order {delivery_id} · {place['place']} · by {deadline}", branch_id=branch)
         store.audit(actor["user_id"], "order_created", delivery_id, {"place": place["place"]}, branch)
     return delivery_id, place
@@ -117,7 +135,10 @@ def validate_rows(df):
     for i, row in enumerate(df.fillna("").to_dict("records"), start=2):
         row = {k: str(row.get(k, "")).strip() for k in CSV_COLUMNS}
         row["category"] = row["category"].capitalize() or "Parcel"
-        row["priority"], row["package_size"] = row["priority"].lower() or "standard", row["package_size"].lower() or "small"
+        row["priority"], row["package_size"] = (
+            row["priority"].lower() or "standard",
+            row["package_size"].lower() or "small",
+        )
         problems, _ = check_order(row["customer"], row["phone"], row["area"], row["category"], row["priority"],
                                   row["deadline"], row["package_size"])
         if problems:
@@ -128,11 +149,13 @@ def validate_rows(df):
 
 
 def import_orders(actor, rows):
+    """Create orders from validated CSV rows. Returns the new delivery ids."""
     return [create_order(actor, r["customer"], r["phone"], r["area"], r["category"], r["priority"], r["deadline"],
                          r["package_size"], r.get("notes", ""))[0] for r in rows]
 
 
 def csv_template():
+    """The CSV text admins download to fill in new orders."""
     return pd.DataFrame([
         {"customer": "Anand Stores", "phone": "+91 90000 30001", "area": "Gandhipuram", "category": "Groceries",
          "priority": "standard", "deadline": "14:30", "package_size": "medium", "notes": "Back gate"},
@@ -148,7 +171,9 @@ def _critical_partners(branch):
     vehicles_hit = set()
     for issue in store.list_issues(store.OPEN_ISSUE_STATUSES, branch_id=branch):
         critical.add(issue["partner_id"])
-        vehicles_hit |= {r["vehicle_id"] for r in (issue.get("plan") or {}).get("risk", []) if r["risk_label"] == "Critical"}
+        vehicles_hit |= {
+            r["vehicle_id"] for r in (issue.get("plan") or {}).get("risk", []) if r["risk_label"] == "Critical"
+        }
     return critical, vehicles_hit
 
 
@@ -187,6 +212,8 @@ def candidates(order, branch, extra_load=None, partners=None, deliveries=None):
     critical, vehicles_hit = _critical_partners(branch)
     point = (float(order["lat"]), float(order["lng"]))
     deadline = hhmm_to_min(order["deadline"])
+    rain, weekday = predict.WEATHER[predict.weather_now()], date.today().weekday()
+    category = order.get("category") or predict.CATEGORY_OF_PRIORITY.get(order.get("priority"), "Parcel")
     out = []
     for p in partners.to_dict("records"):
         kind = p["vehicle_type"]
@@ -196,7 +223,9 @@ def candidates(order, branch, extra_load=None, partners=None, deliveries=None):
             continue
         if order.get("package_size", "small") not in FITS.get(kind, {"small"}):
             continue
-        own = deliveries[(deliveries["vehicle_id"] == p["vehicle_id"]) & (deliveries["delivery_id"] != order["delivery_id"])]
+        own = deliveries[
+            (deliveries["vehicle_id"] == p["vehicle_id"]) & (deliveries["delivery_id"] != order["delivery_id"])
+        ]
         own = own.sort_values("eta_min")
         load, limit = len(own) + extra_load.get(p["partner_id"], 0), MAX_STOPS.get(kind, 8)
         if load >= limit:
@@ -205,14 +234,23 @@ def candidates(order, branch, extra_load=None, partners=None, deliveries=None):
         index, eta, added, _ = _insertion((p["lat"], p["lng"]), stops, point)
         near_km = min([haversine_km(p["lat"], p["lng"], *point)] + [haversine_km(s[0], s[1], *point) for s in stops])
         same_route = order.get("road_id") in str(p.get("route_roads") or "").split("|")
-        feasible = eta <= deadline
-        score = near_km + 2.5 * load / limit - (1.5 if same_route else 0) + (0 if feasible else 50)
+        before = (p["lat"], p["lng"]) if index == 0 else stops[index - 1][:2]
+        likely = predict.predict_delay({
+            "road_id": order.get("road_id"), "hour": eta / 60, "weekday": weekday, "rain_mm": rain,
+            "distance_km": haversine_km(*before, *point), "stops_before": index, "vehicle_type": kind,
+            "category": category if category in predict.CATEGORIES else "Parcel",
+            "experience_months": float(p.get("experience_months") or 0), "slack_min": deadline - eta})
+        extra = max(0.0, likely["delay_min"])  # minutes the model expects on top of the planned ETA
+        feasible = eta + extra <= deadline
+        score = near_km + 2.5 * load / limit - (1.5 if same_route else 0) + 0.1 * extra + (0 if feasible else 50)
         reason = (f"{p['name']} · {near_km:.1f} km away · {load}/{limit} load · {VEHICLE_EMOJI.get(kind, '')} fits"
-                  + (" · same route" if same_route else "") + ("" if feasible else " · late"))
+                  + (" · same route" if same_route else "") + (f" · +{extra:.0f} min likely" if extra >= 3 else "")
+                  + ("" if feasible else " · late"))
         out.append({"partner_id": p["partner_id"], "name": p["name"], "vehicle_id": p["vehicle_id"],
                     "vehicle_type": kind, "distance_km": round(near_km, 2), "load": load, "limit": limit,
                     "same_route": same_route, "feasible": feasible, "eta_min": int(round(eta)), "position": index,
-                    "added_min": int(round(added)), "score": round(score, 3), "reason": reason})
+                    "added_min": int(round(added)), "score": round(score, 3), "reason": reason,
+                    "likely_delay_min": round(extra, 1), "p_late": likely["p_late"]})
     return sorted(out, key=lambda c: c["score"])
 
 
@@ -226,6 +264,7 @@ def _order(delivery_id, branch):
 
 
 def best_match(delivery_id, branch):
+    """The best partner for an order (lowest score), or None when nobody fits."""
     found = candidates(_order(delivery_id, branch), branch)
     return found[0] if found else None
 
@@ -255,10 +294,13 @@ def assign(actor, delivery_id, dp_id, reason="Assigned", source="manual"):
         order = _order(delivery_id, branch)
         if order["status"] in store.ACTIVE_DONE:
             raise ValueError(f"{delivery_id} is already {order['status']}.")
-        partner = conn.execute("SELECT p.*, v.type AS vehicle_type, v.current_lat AS lat, v.current_lng AS lng, "
-                               "v.route_roads, COALESCE(u.is_active, 1) AS account_active FROM partners p JOIN vehicles v "
-                               "ON v.vehicle_id = p.vehicle_id LEFT JOIN users u ON u.dp_id = p.partner_id "
-                               "WHERE p.partner_id = ? AND p.branch_id = ?", (dp_id, branch)).fetchone()
+        partner = conn.execute(
+            "SELECT p.*, v.type AS vehicle_type, v.current_lat AS lat, v.current_lng AS lng, "
+            "v.route_roads, COALESCE(u.is_active, 1) AS account_active FROM partners p JOIN vehicles v "
+            "ON v.vehicle_id = p.vehicle_id LEFT JOIN users u ON u.dp_id = p.partner_id "
+            "WHERE p.partner_id = ? AND p.branch_id = ?",
+            (dp_id, branch),
+        ).fetchone()
         if partner is None:
             raise PermissionError(f"{dp_id} is not a partner of your branch")
         if not partner["account_active"]:
@@ -269,10 +311,10 @@ def assign(actor, delivery_id, dp_id, reason="Assigned", source="manual"):
         if old and old["partner_id"] == dp_id:
             raise ValueError(f"{delivery_id} is already with {dp_id}.")
 
-        others = pd.read_sql_query(
-            "SELECT delivery_id, lat, lng, planned_eta FROM deliveries WHERE vehicle_id = ? AND delivery_id != ? "
-            "AND status NOT IN ('delivered', 'failed') AND planned_eta IS NOT NULL", conn,
-            params=(partner["vehicle_id"], delivery_id))
+        others = store.frame(
+            conn, "SELECT delivery_id, lat, lng, planned_eta FROM deliveries WHERE vehicle_id = ? AND delivery_id != ? "
+            "AND status NOT IN ('delivered', 'failed') AND planned_eta IS NOT NULL",
+            (partner["vehicle_id"], delivery_id))
         others["eta_min"] = others["planned_eta"].apply(hhmm_to_min)
         others = others.sort_values("eta_min")
         index, eta, added, _ = _insertion((partner["lat"], partner["lng"]),
@@ -282,14 +324,24 @@ def assign(actor, delivery_id, dp_id, reason="Assigned", source="manual"):
             conn.execute("UPDATE deliveries SET planned_eta = ? WHERE delivery_id = ?",
                          (min_to_hhmm(later.eta_min + added), later.delivery_id))
         now = _now()
-        conn.execute("UPDATE deliveries SET vehicle_id = ?, status = 'assigned', planned_eta = ?, assigned_at = ?, "
-                     "assigned_by = ?, accepted_at = NULL, picked_at = NULL, original_vehicle = COALESCE(original_vehicle, ?), "
-                     "note = ? WHERE delivery_id = ?",
-                     (partner["vehicle_id"], min_to_hhmm(eta), now, actor["user_id"], partner["vehicle_id"],
-                      "reassigned" if old else "", delivery_id))
+        conn.execute(
+            "UPDATE deliveries SET vehicle_id = ?, status = 'assigned', planned_eta = ?, assigned_at = ?, "
+            "assigned_by = ?, accepted_at = NULL, picked_at = NULL, original_vehicle = COALESCE(original_vehicle, ?), "
+            "note = ? WHERE delivery_id = ?",
+            (
+                partner["vehicle_id"],
+                min_to_hhmm(eta),
+                now,
+                actor["user_id"],
+                partner["vehicle_id"],
+                "reassigned" if old else "",
+                delivery_id,
+            ),
+        )
         _renumber(conn, partner["vehicle_id"])
         if old:
             _renumber(conn, order["vehicle_id"])
+        escalation.offer(conn, delivery_id, dp_id, branch)  # Sent -> Seen -> Ringing -> Calling -> admin alert
         if partner["status"] == "standby":
             conn.execute("UPDATE partners SET status = 'on_duty' WHERE partner_id = ?", (dp_id,))
         due = min_to_hhmm(hhmm_to_min(order["deadline"]))
@@ -312,6 +364,7 @@ def assign(actor, delivery_id, dp_id, reason="Assigned", source="manual"):
 
 
 def reassign(actor, delivery_id, dp_id, reason):
+    """Move an order to another partner (same rules and messages as assign)."""
     return assign(actor, delivery_id, dp_id, reason=reason)
 
 
@@ -323,10 +376,13 @@ def unassign(actor, delivery_id, reason):
         if order["status"] in store.ACTIVE_DONE or not order["vehicle_id"]:
             raise ValueError(f"{delivery_id} can't be unassigned.")
         old = _partner_of_vehicle(conn, order["vehicle_id"], branch)
-        conn.execute("UPDATE deliveries SET vehicle_id = NULL, status = 'unassigned', planned_eta = NULL, stop_order = 0, "
-                     "assigned_at = NULL, assigned_by = NULL, accepted_at = NULL, picked_at = NULL WHERE delivery_id = ?",
-                     (delivery_id,))
+        conn.execute(
+            "UPDATE deliveries SET vehicle_id = NULL, status = 'unassigned', planned_eta = NULL, stop_order = 0, "
+            "assigned_at = NULL, assigned_by = NULL, accepted_at = NULL, picked_at = NULL WHERE delivery_id = ?",
+            (delivery_id,),
+        )
         _renumber(conn, order["vehicle_id"])
+        escalation.clear(conn, delivery_id)
         if old:
             store.add_message(f"{delivery_id} removed from your list.", to_partner=old["partner_id"], branch_id=branch)
         conn.execute("INSERT INTO assignment_history(delivery_id, from_dp, to_dp, by_user, reason, time, branch_id) "
@@ -338,6 +394,7 @@ def unassign(actor, delivery_id, reason):
 
 
 def unassigned_orders(branch):
+    """Orders of the branch waiting for a partner, most urgent first."""
     df = store.deliveries_df(branch_id=branch)
     return df[df["status"] == "unassigned"].sort_values(["deadline_min", "delivery_id"])
 
@@ -399,6 +456,8 @@ def advance(dp_id, branch_id, delivery_id, to_status, note=""):
         expected = NEXT.get(row["status"])
         if expected != to_status:
             raise ValueError(f"Next step for {delivery_id}: {ACTION.get(expected, 'none')}.")
+        if to_status == "delivered" and row["priority"] in PROOF_FOR and not row["pod_at"]:
+            raise ValueError(f"{delivery_id} is medical: a photo and the customer's code or signature are needed.")
         fields = {"status": to_status}
         if to_status in STAMP:
             fields[STAMP[to_status]] = _now()
@@ -406,6 +465,8 @@ def advance(dp_id, branch_id, delivery_id, to_status, note=""):
             fields["proof_note"] = str(note).strip()[:200]
         sets = ", ".join(f"{k} = ?" for k in fields)
         conn.execute(f"UPDATE deliveries SET {sets} WHERE delivery_id = ?", (*fields.values(), delivery_id))
+        if to_status == "accepted":
+            escalation.accepted(conn, delivery_id, dp_id, branch_id)
         store.log_event("delivery", f"{row['partner_name']} · {delivery_id} · {STAGE[to_status]}", branch_id=branch_id)
         store._bump(conn)
     return True

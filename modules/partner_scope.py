@@ -9,8 +9,6 @@ from modules import issues, store
 from modules.data_loader import load_all, nearest_place
 
 PARTNER_STATUSES = ("on_duty", "on_break", "standby")
-PROFILE_FIELDS = ["partner_id", "name", "phone", "status", "vehicle_id", "reg_no", "vehicle_type", "area", "assigned",
-                  "delivered", "pending", "urgent", "next_stop", "next_eta", "shift", "languages", "rating"]
 
 
 def _own(dp_id, branch_id):
@@ -28,6 +26,7 @@ def _own(dp_id, branch_id):
 
 # ---------------------------------------------------------------- reads (own rows only)
 def get_partner_profile(dp_id, branch_id):
+    """The partner's own profile: vehicle, shift, counts and next stop."""
     partner, vehicle = _own(dp_id, branch_id)
     deliveries = get_partner_deliveries(dp_id, branch_id)
     todo = deliveries[~deliveries["status"].isin(["delivered", "failed"])].sort_values("eta_min")
@@ -51,8 +50,9 @@ def get_partner_profile(dp_id, branch_id):
 def get_partner_deliveries(dp_id, branch_id):
     """This partner's deliveries (incl. ones reassigned to them), with a risk label for their own stops."""
     _own(dp_id, branch_id)
-    df = store._df("SELECT d.* FROM deliveries d JOIN partners p ON p.vehicle_id = d.vehicle_id "
-                   "WHERE p.partner_id = ? AND d.branch_id = ? ORDER BY d.stop_order", (dp_id, branch_id))
+    df = store.public(store._df("SELECT d.* FROM deliveries d JOIN partners p ON p.vehicle_id = d.vehicle_id "
+                                "WHERE p.partner_id = ? AND d.branch_id = ? ORDER BY d.stop_order",
+                                (dp_id, branch_id)))
     df["eta_min"] = df["planned_eta"].apply(store.hhmm_to_min)
     df["deadline_min"] = df["deadline"].apply(store.hhmm_to_min)
     own_ids = set(df["delivery_id"])
@@ -80,6 +80,7 @@ def get_partner_route(dp_id, branch_id):
 
 
 def get_partner_notifications(dp_id, branch_id, unread_only=False):
+    """The partner's own messages (only unread ones if asked)."""
     _own(dp_id, branch_id)
     messages = store.messages_for(dp_id, limit=50)
     return [m for m in messages if not m["read"]] if unread_only else messages
@@ -125,11 +126,13 @@ def advance_delivery(dp_id, branch_id, delivery_id, to_status, note=""):
 
 
 def mark_notifications_read(dp_id, branch_id):
+    """Mark all of the partner's own messages as read."""
     _own(dp_id, branch_id)
     store.mark_messages_read(dp_id)
 
 
 def set_status(dp_id, branch_id, status):
+    """Change the partner's own status (on duty, on break, standby)."""
     partner, _ = _own(dp_id, branch_id)
     if status not in PARTNER_STATUSES:
         raise ValueError(f"Unknown status {status}")
@@ -137,13 +140,13 @@ def set_status(dp_id, branch_id, status):
     store.log_event("system", f"{partner['name']} is now {status.replace('_', ' ')}", branch_id=branch_id)
 
 
-def preview_issue(dp_id, branch_id, text="", audio=None, quick_type=None):
+def preview_issue(dp_id, branch_id, text="", audio=None, quick_type=None, photo=None):
     """What we understood from the partner's report (nothing is saved)."""
     _own(dp_id, branch_id)
-    return issues.preview(dp_id, text=text, audio=audio, quick_type=quick_type, branch_id=branch_id)
+    return issues.preview(dp_id, text=text, audio=audio, quick_type=quick_type, branch_id=branch_id, photo=photo)
 
 
-def report_issue(dp_id, branch_id, problem, transcript="", engine="typed", audio=None, quick_type=None):
+def report_issue(dp_id, branch_id, problem, transcript="", engine="typed", audio=None, quick_type=None, photo=None):
     """Send the partner's report to their branch. The reporter is always the logged-in partner."""
     partner, vehicle = _own(dp_id, branch_id)
     problem = {**problem, "reported_by": dp_id, "reporter_name": partner["name"]}
@@ -154,4 +157,4 @@ def report_issue(dp_id, branch_id, problem, transcript="", engine="typed", audio
         if problem["delivery_id"] not in own:
             raise PermissionError(f"Delivery {problem['delivery_id']} is not assigned to {dp_id}")
     return issues.submit(dp_id, problem, transcript=transcript, engine=engine, audio=audio,
-                         quick_type=quick_type, source="partner", branch_id=branch_id)
+                         quick_type=quick_type, source="partner", branch_id=branch_id, photo=photo)

@@ -1,7 +1,8 @@
 """Partners: the team as a table (select a row for details) and Add partner."""
 import streamlit as st
 
-from modules import admin, guards, manager_ui as mui, ui
+from modules import admin, guards, ui
+from modules import manager_ui as mui
 from modules.data_loader import load_all
 
 guards.require_role("branch_admin")

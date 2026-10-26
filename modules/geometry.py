@@ -21,20 +21,24 @@ COIMBATORE_BOUNDS = ((10.85, 76.85), (11.15, 77.10))  # (min lat, min lng), (max
 
 
 def point_key(lat, lng):
+    """Cache key for a map point (5 decimals ≈ 1 m)."""
     return f"{float(lat):.5f},{float(lng):.5f}"
 
 
 def leg_key(a, b):
+    """Cache key for the driving leg between two points."""
     return f"leg:{point_key(*a)}>{point_key(*b)}"
 
 
 def in_coimbatore(lat, lng):
+    """True if the point lies inside the Coimbatore bounding box."""
     (lat0, lng0), (lat1, lng1) = COIMBATORE_BOUNDS
     return lat0 <= float(lat) <= lat1 and lng0 <= float(lng) <= lng1
 
 
 # ---------------------------------------------------------------- OSRM (used only by the seed/build script)
 def online():
+    """False when RIPPLE_OFFLINE=1 (tests, offline demos): never call OSRM then."""
     return os.getenv("RIPPLE_OFFLINE") != "1"
 
 
@@ -96,6 +100,7 @@ def cache_stamp():
 
 
 def load_cache_file():
+    """The committed road-shape cache (data/route_geometry.json), or {} if missing."""
     try:
         return json.loads(CACHE_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):

@@ -14,7 +14,6 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 CSS_PATH = ASSETS / "style.css"
 LOGO_PATH, MARK_PATH, FAVICON_PATH = ASSETS / "logo.svg", ASSETS / "logo_mark.svg", ASSETS / "favicon.png"
 APP_NAME = "DEPORT"
-APP_TITLE = "DEPORT – Disruption-Aware Logistics Decision Support System"
 TAGLINE = "From Disruption to Decision."
 MARK_SVG = MARK_PATH.read_text(encoding="utf-8").split("-->", 1)[-1].strip()
 MARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">' + MARK_SVG
@@ -32,10 +31,13 @@ STATUS = {
     "unassigned": ("Unassigned", "dp-s-off", "#94A3B8", "⚪"),
 }
 RISK_STATE = {"Critical": "critical", "High": "delayed", "Medium": "delayed", "Low": "normal"}
-RISK_HEX = {"Critical": "#F43F5E", "High": "#FACC15", "Medium": "#FACC15", "Low": "#22C55E", "On track": "#94A3B8"}
 VEHICLE_EMOJI = {"bike": "🏍️", "car": "🚗", "van": "🚐", "truck": "🚚"}
-VEHICLE_ICON = {"bike": ":material/two_wheeler:", "car": ":material/directions_car:", "van": ":material/airport_shuttle:",
-                "truck": ":material/local_shipping:"}
+VEHICLE_ICON = {
+    "bike": ":material/two_wheeler:",
+    "car": ":material/directions_car:",
+    "van": ":material/airport_shuttle:",
+    "truck": ":material/local_shipping:",
+}
 PARTNER_STATUS = {"on_duty": ("On duty", "rp-low", "#16A34A"), "standby": ("Standby", "rp-brand", "#2563EB"),
                   "on_break": ("Break", "rp-neutral", "#94A3B8"), "off_duty": ("Off", "rp-neutral", "#94A3B8")}
 ISSUE_STATUS = {"new": ("Needs place", "delayed"), "analysed": ("Waiting", "critical"),
@@ -47,10 +49,12 @@ ROLE_BADGES = {"super_admin": ("Super Admin", "rp-super", "#7C3AED"),
 
 # ---------------------------------------------------------------- page shell
 def setup_store():
+    """Create or upgrade the database before the first page renders."""
     store.init_db()
 
 
 def setup_page(layout="wide", role=None):
+    """Page config and design-system CSS: wide layout for admins, big buttons for partners."""
     st.set_page_config(page_title=APP_NAME, page_icon=str(FAVICON_PATH), layout=layout,
                        initial_sidebar_state="auto")  # menu open on laptops, folded on phones
     extra = ""
@@ -72,6 +76,7 @@ def is_dark():
 
 
 def clock_text():
+    """The simulated clock, e.g. 'Fri 09 Oct · 09:00'."""
     return f"{date.today().strftime('%a %d %b')} · {min_to_hhmm(NOW_MIN)}"
 
 
@@ -86,11 +91,13 @@ def header(title, subtitle="", live=True):
 
 
 def section(title, icon_name=None):
+    """A section heading with an optional Material icon."""
     ico = icon(icon_name) if icon_name else ""
     st.markdown(f'<p class="dp-h2">{ico}{escape(title)}</p>', unsafe_allow_html=True)
 
 
 def step(number, title):
+    """A numbered step heading (① ② ③)."""
     st.markdown(f'<div class="dp-step"><b>{number}</b>{escape(title)}</div>', unsafe_allow_html=True)
 
 
@@ -103,12 +110,14 @@ def card(name=None, **kwargs):
 
 
 def icon(name, size=None):
+    """HTML for a Material Symbols icon."""
     style = f' style="font-size:{size}px"' if size else ""
     return f'<span class="dp-ico" aria-hidden="true"{style}>{escape(name)}</span>'
 
 
 # ---------------------------------------------------------------- status language
 def risk_state(label):
+    """Status key (normal/delayed/critical) for a risk label."""
     return RISK_STATE.get(label, "normal")
 
 
@@ -124,6 +133,7 @@ def partner_state(status, worst_risk=None):
 
 
 def pill_html(state, text=None):
+    """HTML for a coloured status pill."""
     word, css, _, _ = STATUS.get(state, STATUS["off"])
     return f'<span class="dp-pill {css}"><i></i>{escape(text or word)}</span>'
 
@@ -135,37 +145,46 @@ def status_text(state):
 
 
 def issue_pill(status):
+    """Status pill for an issue status."""
     word, state = ISSUE_STATUS.get(status, (status, "off"))
     return pill_html(state, word)
 
 
 def badge(text, css="rp-neutral"):
+    """HTML for a small neutral badge."""
     return f'<span class="rp-badge {css}">{escape(str(text))}</span>'
 
 
 def risk_badge(label):
+    """Status pill for a risk label."""
     return pill_html(risk_state(label), label)
 
 
+def late_badge(prediction, reasons=True):
+    """Delay-model badge: 'Predicted late 72%' (red) from 50 %, else 'Late risk 7%', plus the top 2 reasons."""
+    if not prediction:
+        return ""
+    p = prediction["p_late"]
+    pill = (pill_html("critical", f"Predicted late {p:.0%}") if p >= 0.5
+            else pill_html("delayed" if p >= 0.2 else "normal", f"Late risk {p:.0%}"))
+    why = " · ".join(prediction.get("reasons") or [])
+    return pill + (f" <span class='dp-small'>{escape(why)}</span>" if reasons and why else "")
+
+
 def severity_badge(severity):
+    """Status pill for a severity."""
     state = {"critical": "critical", "high": "critical", "medium": "delayed"}.get(severity, "normal")
     return pill_html(state, str(severity).capitalize())
 
 
-def partner_badge(status):
-    return pill_html(partner_state(status))
-
-
-def issue_badge(status):
-    return issue_pill(status)
-
-
 # ---------------------------------------------------------------- building blocks
 def initials(name):
+    """Up to two initials for an avatar."""
     return "".join(part[0] for part in str(name).split()[:2]).upper()
 
 
 def person(name, line, colour="#2563EB"):
+    """HTML for an avatar with a name and one line under it."""
     return (f'<div class="dp-person"><div class="dp-avatar" style="background:{colour}">{escape(initials(name))}</div>'
             f'<div><b>{escape(name)}</b><br><small>{escape(line)}</small></div></div>')
 
@@ -193,11 +212,6 @@ def kpi_cards(items):
     st.markdown(f'<div class="dp-kpis">{"".join(tiles)}</div>', unsafe_allow_html=True)
 
 
-def kpi_row(items, tile_width=None):
-    """Older call style: [(label, value, trend)]."""
-    kpi_cards([("insights", value, label, trend, None) for label, value, trend in items])
-
-
 def empty_state(icon_name, text, button=None, key=None, **button_kwargs):
     """Icon + one line (+ one button). Returns True when the button was clicked."""
     st.markdown(f'<div class="dp-empty">{icon(icon_name)}<p>{escape(text)}</p></div>', unsafe_allow_html=True)
@@ -213,7 +227,8 @@ def skeleton(height=160, count=1):
     return block * count
 
 
-def progress_ring(done, total, size=84):
+def progress_ring(done, total, size=84, of_text=None, word="delivered"):
+    """SVG ring showing done/total (of_text / word let the partner app say it in Tamil)."""
     share = done / total if total else 0
     r, c = 34, 2 * 3.14159 * 34
     return (f'<div class="dp-ring"><svg width="{size}" height="{size}" viewBox="0 0 84 84" role="img" '
@@ -222,8 +237,8 @@ def progress_ring(done, total, size=84):
             + (f'<circle cx="42" cy="42" r="{r}" fill="none" stroke="#22C55E" stroke-width="9" stroke-linecap="round" '
                f'stroke-dasharray="{c * share:.1f} {c:.1f}" transform="rotate(-90 42 42)"/>' if done else "")
             + f'<text x="42" y="47" text-anchor="middle" font-size="17" font-weight="750" '
-            f'fill="var(--dp-text)">{done}/{total}</text></svg><div><div class="n">{done} of {total}</div>'
-            f'<div class="dp-small">delivered</div></div></div>')
+            f'fill="var(--dp-text)">{done}/{total}</text></svg><div><div class="n">{of_text or f"{done} of {total}"}'
+            f'</div><div class="dp-small">{escape(word)}</div></div></div>')
 
 
 def before_after(rows):
@@ -245,7 +260,7 @@ def rec_card(action):
 
 # ---------------------------------------------------------------- saved preferences (filters, last page)
 PREF_KEYS = ("live_map_status", "live_map_kind", "live_map_road", "live_map_focus", "team_status", "team_kind",
-             "team_alerts", "del_state", "del_priority", "del_partner")
+             "team_alerts", "del_state", "del_priority", "del_partner", "del_not_accepted", "lang")
 
 
 def sync_prefs(user, page):
@@ -258,7 +273,9 @@ def sync_prefs(user, page):
         st.session_state["_prefs_seen"] = dict(st.session_state["_prefs"])
         return st.session_state["_prefs"].get("last_page")
     seen = st.session_state.setdefault("_prefs_seen", {})
-    changed = {k: st.session_state[k] for k in PREF_KEYS if k in st.session_state and st.session_state[k] != seen.get(k)}
+    changed = {
+        k: st.session_state[k] for k in PREF_KEYS if k in st.session_state and st.session_state[k] != seen.get(k)
+    }
     if page and page != seen.get("last_page"):
         changed["last_page"] = page
     if changed:
@@ -299,6 +316,7 @@ def pause_live_updates(seconds=180):
 
 
 def resume_live_updates():
+    """Let the auto-refresh run again after a form was sent."""
     st.session_state.pop("_pause_until", None)
 
 
@@ -343,7 +361,13 @@ def sidebar_user():
                     + f'<div style="margin:10px 0 2px">{badge(label, css)}</div>'
                     + (f'<small style="color:var(--dp-muted)">{escape(user["branch_name"])}</small>'
                        if user.get("branch_name") else ""), unsafe_allow_html=True)
-        if st.button("Sign out", icon=":material/logout:", width="stretch", key="logout"):
+        if user["role"] == "partner":
+            from modules import i18n
+
+            i18n.picker()  # English / தமிழ், saved with the partner's preferences
+        from modules.i18n import t
+
+        if st.button(t("sign_out"), icon=":material/logout:", width="stretch", key="logout"):
             guards.logout()
         if user["role"] == "super_admin" and st.button("Reset demo data", icon=":material/restart_alt:",
                                                         width="stretch", key="reset_demo_open"):

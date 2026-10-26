@@ -9,7 +9,6 @@ Rules (most urgent first):
 Every action carries a plain-English "why" and drafted messages.
 Works for one disruption or several at once (detours never use another blocked road).
 """
-import json
 import re
 
 from modules.data_loader import NOW_MIN, haversine_km, min_to_hhmm
@@ -34,6 +33,7 @@ TYPE_WORDS = {
 
 # ---------------------------------------------------------------- helpers
 def travel_min(km):
+    """Driving minutes for a straight-line distance, using the road factor and city speed."""
     return km * ROAD_FACTOR / URBAN_SPEED_KMPH * 60
 
 
@@ -68,6 +68,7 @@ def find_alternate_road(blocked_road_id, data, avoid=()):
 
 
 def nearest_backup(data, lat, lng):
+    """The closest backup vehicle (status 'backup') to a point, or None."""
     backups = data["vehicles"].set_index("vehicle_id")
     backups = backups[backups["status"] == "backup"]
     if backups.empty:
@@ -113,11 +114,18 @@ def _customer_sms(row, eta, extra=""):
 
 
 # ---------------------------------------------------------------- main
-def recommend(impact, disruptions, data, polish=True):
+def action_key(action):
+    """Stable id of a recommendation, e.g. 'reroute|vehicle V2' – what the admin skips and the log learns from."""
+    return f"{action['action_type']}|{action['target']}"
+
+
+def recommend(impact, disruptions, data, polish=True, skip=()):
     """Return (actions, before_after, after_df).
 
     actions: list of dicts with action_type, target, description,
              expected_delay_saved_min, extra_km, deliveries_protected, why, messages
+    skip:    action keys the admin turned down; the plan is rebuilt without them (a skipped backup move falls back
+             to a reroute, a skipped reroute to prioritise / notify)
     before_after: predicted misses / delay / critical counts before vs after
     after_df: impact rows with new vehicle, ETA and risk after applying the plan
     """
@@ -158,6 +166,8 @@ def recommend(impact, disruptions, data, polish=True):
     urgent = after[((after["risk_label"] == "Critical") & after["priority"].isin(["medical", "perishable"]))
                    | (after["_broken"] & after["risk_label"].isin(["Critical", "High"]))]
     for idx, row in urgent.sort_values("deadline_min").iterrows():
+        if f"reassign|delivery {row['delivery_id']}" in skip:
+            continue
         source = vehicles.loc[row["original_vehicle"]]
         if backup is None:
             backup = nearest_backup(data, source["current_lat"], source["current_lng"])
@@ -189,38 +199,57 @@ def recommend(impact, disruptions, data, polish=True):
         short = {"title": f"Move {row['delivery_id']} to {backup.name}",
                  "why_short": f"{row['priority'].capitalize()} parcel, {_spare(row['slack_min'])}.\n{free}",
                  "impact_short": f"Arrives {eta_txt} · saves {max(saved, 0)} min"}
-        actions.append({
-            **short,
-            "action_type": "reassign",
-            "target": f"delivery {row['delivery_id']}",
-            "description": f"Move {row['delivery_id']} ({row['customer']}) from {row['original_vehicle']} "
-                           f"to backup {backup.name} ({backup['driver']})",
-            "expected_delay_saved_min": max(saved, 0),
-            "extra_km": round((to_pickup + to_customer) * ROAD_FACTOR, 1),
-            "deliveries_protected": [row["delivery_id"]],
-            "why": why,
-            "risk_label": row["risk_label"],
-            "messages": [
-                {"to": f"{backup['driver']} (driver, {backup.name})", "kind": "driver", "vehicle_id": backup.name,
-                 "text": f"{backup['driver']}, please collect {row['delivery_id']} from "
-                         f"{source['driver']} ({row['original_vehicle']}) and deliver to "
-                         f"{row['customer']}, {row['address_area']} by {eta_txt}. "
-                         f"Avoid {name_of(row['cause_road_id'])}."},
-                {"to": f"{source['driver']} (driver, {row['original_vehicle']})", "kind": "driver",
-                 "vehicle_id": row["original_vehicle"],
-                 "text": f"{source['driver']}, hand {row['delivery_id']} ({row['customer']}) to {backup['driver']} "
-                         f"in the backup {backup['type']} {backup.name} when they reach you. Continue with your other stops."},
-                {"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer",
-                 "customer": row["customer"], "phone": row["customer_phone"],
-                 "text": _customer_sms(row, eta_txt, f"We've moved it to a dedicated vehicle ({backup['reg_no']}). ")},
-            ],
-        })
+        actions.append(
+            {
+                **short,
+                "action_type": "reassign",
+                "target": f"delivery {row['delivery_id']}",
+                "description": f"Move {row['delivery_id']} ({row['customer']}) from {row['original_vehicle']} "
+                f"to backup {backup.name} ({backup['driver']})",
+                "expected_delay_saved_min": max(saved, 0),
+                "extra_km": round((to_pickup + to_customer) * ROAD_FACTOR, 1),
+                "deliveries_protected": [row["delivery_id"]],
+                "why": why,
+                "risk_label": row["risk_label"],
+                "messages": [
+                    {
+                        "to": f"{backup['driver']} (driver, {backup.name})",
+                        "kind": "driver",
+                        "vehicle_id": backup.name,
+                        "text": f"{backup['driver']}, please collect {row['delivery_id']} from "
+                        f"{source['driver']} ({row['original_vehicle']}) and deliver to "
+                        f"{row['customer']}, {row['address_area']} by {eta_txt}. "
+                        f"Avoid {name_of(row['cause_road_id'])}.",
+                    },
+                    {
+                        "to": f"{source['driver']} (driver, {row['original_vehicle']})",
+                        "kind": "driver",
+                        "vehicle_id": row["original_vehicle"],
+                        "text": f"{source['driver']}, hand {row['delivery_id']} ({row['customer']}) to "
+                        f"{backup['driver']} in the backup {backup['type']} {backup.name} when they reach you. "
+                        "Continue with your other stops.",
+                    },
+                    {
+                        "to": f"{row['customer']} ({row['customer_phone']})",
+                        "kind": "customer",
+                        "customer": row["customer"],
+                        "phone": row["customer_phone"],
+                        "delivery_id": row["delivery_id"],
+                        "text": _customer_sms(
+                            row, eta_txt, f"We've moved it to a dedicated vehicle ({backup['reg_no']}). "
+                        ),
+                    },
+                ],
+            }
+        )
         after.loc[idx, ["vehicle_id", "new_eta_min", "action"]] = [backup.name, int(eta), "reassigned"]
 
     # ---- 2. Remaining Critical / High -> reroute their vehicle (one action per vehicle),
     #         with one detour per blocked road on its route
     pending = after[(after["action"] == "") & after["risk_label"].isin(["Critical", "High"]) & ~after["_broken"]]
     for vid in pending["original_vehicle"].unique():
+        if f"reroute|vehicle {vid}" in skip:
+            continue
         vehicle = vehicles.loc[vid]
         own = after[(after["original_vehicle"] == vid) & (after["action"] == "")]
         protected = own[own["risk_label"].isin(["Critical", "High"])]
@@ -244,7 +273,7 @@ def recommend(impact, disruptions, data, polish=True):
             group["roads"].append(road)
             group["km"], group["min"] = max(group["km"], km), max(group["min"], minutes)
 
-        def rerouted_delay(parts):
+        def rerouted_delay(parts, detours, by_alt):
             delay, cascade = 0, {}
             for p in parts:
                 if p["road_id"] in detours:
@@ -254,7 +283,7 @@ def recommend(impact, disruptions, data, polish=True):
                     delay += p["delay_min"]
             return delay + sum(by_alt[a]["min"] + k * CASCADE_STEP_MIN for a, k in cascade.items())
 
-        new_delays = own["parts"].apply(rerouted_delay)
+        new_delays = own["parts"].apply(rerouted_delay, args=(detours, by_alt))
         saved = int((own["delay_min"] - new_delays).clip(lower=0).max())
         total_km = round(sum(g["km"] for g in by_alt.values()), 1)
         total_min = sum(g["min"] for g in by_alt.values())
@@ -299,6 +328,8 @@ def recommend(impact, disruptions, data, polish=True):
     medium = after[(after["action"] == "") & (after["risk_label"] != "Low")
                    | ((after["action"] == "rerouted") & (after["label_before"] == "Medium"))]
     for idx, row in medium.iterrows():
+        if f"resequence|delivery {row['delivery_id']}" in skip:
+            continue
         if row["action"] == "rerouted":
             saved, new_eta = 0, int(row["new_eta_min"])
             slack = int(row["deadline_min"] - new_eta)
@@ -324,7 +355,7 @@ def recommend(impact, disruptions, data, polish=True):
             "risk_label": row["risk_label"],
             "messages": [{"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer",
                           "customer": row["customer"], "phone": row["customer_phone"],
-                          "text": _customer_sms(row, min_to_hhmm(new_eta))}],
+                          "delivery_id": row["delivery_id"], "text": _customer_sms(row, min_to_hhmm(new_eta))}],
         })
         if row["action"] == "":
             after.loc[idx, ["new_eta_min", "action"]] = [new_eta, "resequenced"]
@@ -332,6 +363,8 @@ def recommend(impact, disruptions, data, polish=True):
     # ---- 4. Low -> reschedule + notify
     low = after[(after["action"] == "") | ((after["action"] == "rerouted") & (after["label_before"] == "Low"))]
     for idx, row in low.iterrows():
+        if f"reschedule_notify|delivery {row['delivery_id']}" in skip:
+            continue
         eta = int(row["new_eta_min"])
         why = (f"{row['customer']} is low risk ({row['slack_min']} min slack, {row['priority']}); "
                f"a heads-up message is enough, no vehicle change needed.")
@@ -349,7 +382,7 @@ def recommend(impact, disruptions, data, polish=True):
             "risk_label": row["risk_label"],
             "messages": [{"to": f"{row['customer']} ({row['customer_phone']})", "kind": "customer",
                           "customer": row["customer"], "phone": row["customer_phone"],
-                          "text": _customer_sms(row, min_to_hhmm(eta))}],
+                          "delivery_id": row["delivery_id"], "text": _customer_sms(row, min_to_hhmm(eta))}],
         })
         if eta > row["deadline_min"]:  # customer agrees a new slot
             new_deadline = eta + RESCHEDULE_BUFFER_MIN

@@ -4,7 +4,8 @@ from html import escape
 import plotly.graph_objects as go
 import streamlit as st
 
-from modules import admin, guards, store, ui
+from modules import admin, assign, escalation, guards, store, ui
+from services import voice_call
 
 guards.require_permission("view_all_branches")
 ui.header("Overview", "All branches")
@@ -52,3 +53,22 @@ with st.expander("Table view", icon=":material/table:"):
                                          "admin": "Admin", "partners": "Partners", "deliveries": "Deliveries",
                                          "delivered": "Done", "delayed": "Delayed", "critical": "Critical",
                                          "open_issues": "Alerts"}), hide_index=True, width="stretch")
+
+ui.section("Order escalation", "timer")
+with ui.card("escalation_settings"):
+    cfg = escalation.settings()
+    with st.form("escalation_form", border=False):
+        c1, c2, c3 = st.columns(3)
+        ring = c1.number_input("Ring after (min)", 1, 60, cfg["ring_after_min"])
+        call = c2.number_input("AI call after (min)", 1, 60, cfg["call_after_min"])
+        alert = c3.number_input("Alert admin after (min)", 1, 60, cfg["alert_after_min"])
+        no_call = st.multiselect("No AI call for", assign.PRIORITIES, format_func=str.capitalize,
+                                 default=[p for p in cfg["no_call_priorities"].split(",") if p in assign.PRIORITIES])
+        if st.form_submit_button("Save", type="primary", icon=":material/save:"):
+            try:
+                escalation.save_settings(guards.current_user(), ring, call, alert, no_call)
+                st.toast("Escalation times saved.", icon=":material/check:")
+            except ValueError as error:
+                st.error(str(error), icon=":material/error:")
+    calls = "Twilio" if voice_call.provider() == "twilio" else "Demo mode (simulated call in the app)"
+    st.caption(f"AI calls: {calls}. Applies to every branch.")

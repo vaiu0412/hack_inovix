@@ -8,9 +8,12 @@ Rules:
 - delay = min(duration, detour penalty for the severity) x severity factor
           + a small extra per later stop (cascade).
 - Several disruptions at once: a delivery hit by more than one adds up the delays.
+- Weather: the plan assumes a dry day. When it rains, the delay model (modules/predict.py) adds the extra minutes
+  the rain costs each hit delivery, as a "weather" part that no reroute can remove. Dry day: nothing is added.
 """
 import pandas as pd
 
+from modules import predict
 from modules.data_loader import NOW_MIN, min_to_hhmm
 
 DETOUR_PENALTY = {"low": 15, "medium": 30, "high": 60, "critical": 90}  # minutes
@@ -21,7 +24,7 @@ IMPACT_COLUMNS = [
     "delivery_id", "customer", "address_area", "priority", "vehicle_id", "road_id", "road_name",
     "stop_order", "cascade_index", "on_blocked_road", "planned_eta", "deadline", "delay_min",
     "new_eta", "slack_min", "will_miss", "eta_min", "deadline_min", "new_eta_min", "lat", "lng",
-    "customer_phone", "severity", "disruption_ids", "parts", "cause_type", "cause_road_id",
+    "customer_phone", "severity", "disruption_ids", "parts", "cause_type", "cause_road_id", "weather_min",
 ]
 SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 NO_RIPPLE_TYPES = ("requirement_change", "customer_unavailable")  # affect one stop, not a road
@@ -35,6 +38,7 @@ def as_list(disruptions):
 
 
 def base_delay(disruption):
+    """Minutes a disruption adds at the blocked point, from its type, severity and duration."""
     severity = disruption.get("severity", "medium")
     duration = int(disruption.get("duration_min") or 0)
     if disruption.get("type") == "breakdown":
@@ -67,7 +71,7 @@ def find_affected(disruption, data):
             continue
         block_index = route.index(road_id)
         own = deliveries[deliveries["vehicle_id"] == vid].sort_values("stop_order")
-        downstream = own[own["road_id"].apply(lambda r: r in route and route.index(r) >= block_index)]
+        downstream = own[[r in route and route.index(r) >= block_index for r in own["road_id"]]]
         for k, (_, d) in enumerate(downstream.iterrows()):
             rows.append((d, k, d["road_id"] == road_id))
     return rows
@@ -98,9 +102,17 @@ def compute_impact(disruptions, data):
                 "delay_min": delay0 + k * CASCADE_STEP_MIN,
             })
 
+    for delivery_id, minutes in predict.weather_extra(list(hits), data).items():
+        if minutes > 0:
+            hits[delivery_id][1].append({"disruption_id": None, "type": "weather", "road_id": None, "vehicle_id": None,
+                                         "severity": "low", "cascade_index": 0, "on_blocked_road": False,
+                                         "delay_min": minutes})
+
     records = []
-    for d, parts in hits.values():
-        delay = sum(p["delay_min"] for p in parts)
+    for d, all_parts in hits.values():
+        parts = [p for p in all_parts if p["type"] != "weather"]
+        weather = sum(p["delay_min"] for p in all_parts if p["type"] == "weather")
+        delay = sum(p["delay_min"] for p in all_parts)
         main = max(parts, key=lambda p: p["delay_min"])  # the disruption that hurts most
         new_eta = int(d["eta_min"] + delay)
         records.append({
@@ -117,9 +129,10 @@ def compute_impact(disruptions, data):
             "will_miss": bool(d["deadline_min"] - new_eta < 0),
             "severity": max((p["severity"] for p in parts), key=lambda s: SEVERITY_RANK.get(s, 1)),
             "disruption_ids": [p["disruption_id"] for p in parts],
-            "parts": parts,
+            "parts": all_parts,
             "cause_type": main["type"],
             "cause_road_id": main["road_id"],
+            "weather_min": weather,
         })
     impact = pd.DataFrame(records, columns=IMPACT_COLUMNS)
     if not impact.empty:

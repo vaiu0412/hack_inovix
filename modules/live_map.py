@@ -37,15 +37,19 @@ MAP_CSS = """
   font-size: 17px; line-height: 1; box-shadow: 0 0 14px var(--c), 0 4px 14px rgba(0,0,0,.55); box-sizing: border-box; }
 .dp-veh.sel { transform: scale(1.22); box-shadow: 0 0 0 5px rgba(59,130,246,.35), 0 0 22px var(--c); }
 .dp-veh.fade { opacity: .42; }
-.dp-veh.pulse::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; border: 3px solid rgba(244,63,94,.65);
+.dp-veh.pulse::after { content: ""; position: absolute; inset: -9px; border-radius: 50%;
+  border: 3px solid rgba(244,63,94,.65);
   animation: dp-ring 1.6s ease-out infinite; }
 @keyframes dp-ring { 0% { transform: scale(.7); opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
 .dp-stop { width: 20px; height: 20px; border-radius: 50%; color: #0B1220; font: 800 11px/1 Inter, Arial, sans-serif;
-  display: flex; align-items: center; justify-content: center; border: 2px solid rgba(255,255,255,.85); box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; border: 2px solid rgba(255,255,255,.85);
+    box-sizing: border-box;
   box-shadow: 0 0 10px rgba(0,0,0,.6); }
 .dp-stop.fade { opacity: .35; }
-.dp-warn { width: 34px; height: 34px; border-radius: 50%; background: rgba(15,23,42,.8); border: 3px solid #F43F5E; display: flex;
-  align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 0 18px rgba(244,63,94,.7); box-sizing: border-box; }
+.dp-warn { width: 34px; height: 34px; border-radius: 50%; background: rgba(15,23,42,.8); border: 3px solid #F43F5E;
+  display: flex;
+  align-items: center; justify-content: center; font-size: 17px; box-shadow: 0 0 18px rgba(244,63,94,.7);
+    box-sizing: border-box; }
 .dp-legend { background: rgba(15,23,42,.78); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.14);
   border-radius: 12px; padding: 8px 10px; font: 600 11px/1.5 Inter, Arial, sans-serif; color: #E2E8F0;
   box-shadow: 0 8px 24px rgba(0,0,0,.45); }
@@ -54,22 +58,27 @@ MAP_CSS = """
 .dp-legend b { width: 16px; height: 0; border-top: 3px solid; display: inline-block; }
 .leaflet-tooltip { font: 600 12px/1.4 Inter, Arial, sans-serif; border-radius: 8px; background: rgba(15,23,42,.92);
   color: #F8FAFC; border: 1px solid rgba(255,255,255,.16); box-shadow: 0 6px 18px rgba(0,0,0,.45); }
-.leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { display: none; }
+.leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before,
+  .leaflet-tooltip-right:before { display: none; }
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: rgba(15,23,42,.95); color: #E2E8F0; }
 .leaflet-popup-content { font: 13px/1.45 Inter, Arial, sans-serif; margin: 10px 12px; }
 .leaflet-popup-content b { font-size: 14px; color: #F8FAFC; }
 .leaflet-control-layers, .leaflet-bar a { background: rgba(15,23,42,.85) !important; color: #E2E8F0 !important;
   border-color: rgba(255,255,255,.14) !important; }
-.leaflet-control-attribution { font-size: 9px !important; opacity: .7; background: rgba(15,23,42,.6) !important; color: #94A3B8 !important; }
+.leaflet-control-attribution { font-size: 9px !important; opacity: .7; background: rgba(15,23,42,.6) !important;
+  color: #94A3B8 !important; }
 .leaflet-control-attribution a { color: #94A3B8 !important; }
 @media (max-width: 640px) { .dp-legend { font-size: 10px; padding: 6px 8px; max-width: 220px; } }
 @media (prefers-reduced-motion: reduce) { .dp-veh.pulse::after { animation: none; } }
 </style>"""
 
-LEGEND = ("<span><i style='background:#22C55E'></i>Normal</span><span><i style='background:#FACC15'></i>Delayed</span>"
-          "<span><i style='background:#F43F5E'></i>Critical</span><span><i style='background:#38BDF8'></i>Available</span><br>"
-          "<span><b style='border-color:#F43F5E;border-top-style:dashed'></b>Blocked</span>"
-          "<span><b style='border-color:#22C55E'></b>Alternate</span><span><b style='border-color:#3B82F6'></b>Route</span>")
+LEGEND = (
+    "<span><i style='background:#22C55E'></i>Normal</span><span><i style='background:#FACC15'></i>Delayed</span>"
+    "<span><i style='background:#F43F5E'></i>Critical</span>"
+    "<span><i style='background:#38BDF8'></i>Available</span><br>"
+    "<span><b style='border-color:#F43F5E;border-top-style:dashed'></b>Blocked</span>"
+    "<span><b style='border-color:#22C55E'></b>Alternate</span><span><b style='border-color:#3B82F6'></b>Route</span>"
+)
 
 
 class Legend(MacroElement):
@@ -77,7 +86,8 @@ class Legend(MacroElement):
     _template = Template("""
         {% macro script(this, kwargs) %}
         var dpLegend = L.control({position: 'bottomleft'});
-        dpLegend.onAdd = function () { var d = L.DomUtil.create('div', 'dp-legend'); d.innerHTML = {{ this.html|tojson }};
+        dpLegend.onAdd = function () { var d = L.DomUtil.create('div', 'dp-legend');
+          d.innerHTML = {{ this.html|tojson }};
           return d; };
         dpLegend.addTo({{ this._parent.get_name() }});
         {% endmacro %}""")
@@ -122,6 +132,7 @@ def path_points(start, stops, shapes):
 
 
 def disruption_point(d, roads, shapes):
+    """Where to draw a disruption: its own point, a known place, or the middle of its road."""
     if d.get("lat") and d.get("lng"):
         return float(d["lat"]), float(d["lng"])
     place = str(d.get("place") or "").lower()
@@ -149,14 +160,15 @@ def add_tiles(m, switcher=True):
 
 
 def build(partners, deliveries, roads, disruptions=(), detour_roads=(), risk_labels=None, selected=None,
-          states=None, focus=None, dark=False, zoom=13):
+          states=None, focus=None, zoom=13, trails=None):
     """folium.Map for one branch (or one partner).
 
     partners: DataFrame (partner_id, name, status, vehicle_type, vehicle_id, lat, lng, route_roads)
     states: {partner_id: 'normal'|'delayed'|'critical'|'available'|'break'|'off'}
     focus: list of (lat, lng) to zoom to (e.g. the alerts), else everything is fitted
+    trails: {vehicle_id: [[lat, lng], ...]} – live GPS / simulated positions; such a vehicle is drawn where it is
     """
-    risk_labels, states = risk_labels or {}, states or {}
+    risk_labels, states, trails = risk_labels or {}, states or {}, trails or {}
     shapes = store.route_geometry()
     m = folium.Map(location=COIMBATORE_CENTER, zoom_start=zoom, tiles=None, control_scale=True, scrollWheelZoom=False)
     add_tiles(m)
@@ -222,20 +234,30 @@ def build(partners, deliveries, roads, disruptions=(), detour_roads=(), risk_lab
         fade = " fade" if selected_row is not None and d["vehicle_id"] != selected_row["vehicle_id"] else ""
         folium.Marker(
             (d["lat"], d["lng"]),
-            icon=folium.DivIcon(html=f"<div class='dp-stop{fade}' style='background:{colour}'>{int(d['stop_order'])}</div>",
-                                icon_size=(20, 20), icon_anchor=(10, 10)),
+            icon=folium.DivIcon(
+                html=f"<div class='dp-stop{fade}' style='background:{colour}'>{int(d['stop_order'])}</div>",
+                icon_size=(20, 20),
+                icon_anchor=(10, 10),
+            ),
             tooltip=f"{d['delivery_id']} · {d['customer']} · ETA {d['planned_eta']}",
-            popup=folium.Popup(f"<b>{escape(d['customer'])}</b><br>{escape(d['address_area'])} · {escape(d['priority'])}"
-                               f"<br>ETA {escape(d['planned_eta'])} · Due {escape(d['deadline'])}"
-                               f"{'<br>' + escape(label) if label else ''}", max_width=240),
+            popup=folium.Popup(
+                f"<b>{escape(d['customer'])}</b><br>{escape(d['address_area'])} · {escape(d['priority'])}"
+                f"<br>ETA {escape(d['planned_eta'])} · Due {escape(d['deadline'])}"
+                f"{'<br>' + escape(label) if label else ''}",
+                max_width=240,
+            ),
         ).add_to(m)
 
     # vehicles: white disc, status ring, vehicle icon; critical pulses; selected is larger, others fade
     for p in records:
         state = states.get(p["partner_id"], "normal")
         ring = STATE.get(state, STATE["off"])[1]
+        trail = trails.get(p["vehicle_id"]) or []
+        if len(trail) > 1:  # where the vehicle really went (last 30 min)
+            folium.PolyLine(trail, color=ring, weight=3, opacity=0.75, dash_array="2 7",
+                            tooltip=f"{p['name']} · last 30 min").add_to(m)
         snapped = shapes.get(f"snap:{p['vehicle_id']}")
-        position = tuple(snapped[0]) if snapped else (p["lat"], p["lng"])
+        position = (p["lat"], p["lng"]) if trail or not snapped else tuple(snapped[0])
         css = "dp-veh" + (" pulse" if state == "critical" else "") + (
             " sel" if p["partner_id"] == selected else " fade" if selected else "")
         folium.Marker(position, z_index_offset=1000 if p["partner_id"] == selected else 500,
@@ -246,7 +268,9 @@ def build(partners, deliveries, roads, disruptions=(), detour_roads=(), risk_lab
 
     Legend(LEGEND).add_to(m)
     folium.LayerControl(position="topright", collapsed=True).add_to(m)
-    everything = [(p["lat"], p["lng"]) for p in records] + list(zip(deliveries["lat"], deliveries["lng"])) + alert_points
+    everything = (
+        [(p["lat"], p["lng"]) for p in records] + list(zip(deliveries["lat"], deliveries["lng"])) + alert_points
+    )
     points = (alert_points or everything) if focus is True else (list(focus) if focus else everything)
     if points:
         lats, lngs = zip(*points)

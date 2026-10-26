@@ -14,7 +14,7 @@ DISRUPTION_COLOR = "#dc2626"
 
 
 def _worst(labels):
-    labels = [l for l in labels if l in LABEL_ORDER]
+    labels = [label for label in labels if label in LABEL_ORDER]
     return min(labels, key=LABEL_ORDER.index) if labels else "Low"
 
 
@@ -76,8 +76,13 @@ def build_graph(disruptions, risk_df, data):
 
             c_node = f"cust:{row['delivery_id']}"
             status = f"misses by {-row['slack_min']} min" if row["slack_min"] < 0 else f"{row['slack_min']} min slack"
-            g.add_node(c_node, layer=4, label=f"{row['customer'][:26]} · {row['deadline']}", color=color,
-                       hover=f"<b>{row['customer']}</b><br>{row['address_area']}<br>Deadline {row['deadline']} · {status}")
+            g.add_node(
+                c_node,
+                layer=4,
+                label=f"{row['customer'][:26]} · {row['deadline']}",
+                color=color,
+                hover=f"<b>{row['customer']}</b><br>{row['address_area']}<br>Deadline {row['deadline']} · {status}",
+            )
             g.add_edge(del_node, c_node)
     return g
 

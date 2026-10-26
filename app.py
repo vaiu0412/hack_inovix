@@ -10,12 +10,15 @@ from pathlib import Path
 
 import streamlit as st
 
-from modules import guards, ui
+from modules import escalation_ui, guards, i18n, live_ui, track_ui, ui
 from modules.guards import BRANCH_PAGES as B
 from modules.guards import PARTNER_PAGES as P
 from modules.guards import SUPER_PAGES as S
 
 ui.setup_store()
+if track_ui.requested():  # a customer's tracking link: public, no sign-in, nothing else of the app
+    track_ui.run()
+    st.stop()
 user = guards.restore()
 role = user["role"] if user else None
 ui.setup_page(layout="centered" if role == "partner" else "wide", role=role)
@@ -51,14 +54,17 @@ elif role == "branch_admin":
         st.Page(B["deliveries"], title="Deliveries", icon=":material/package_2:"),
         st.Page(B["disruptions"], title="Alerts", icon=":material/notifications_active:"),
         st.Page(B["history"], title="History", icon=":material/history:"),
+        st.Page(B["insights"], title="Insights", icon=":material/insights:"),
+        st.Page(B["analytics"], title="Analytics", icon=":material/analytics:"),
     ]
 else:
+    i18n.load(user)  # Tamil or English, as the partner chose last time
     pages = [
-        st.Page(P["today"], title="Today", icon=":material/today:", default=True),
-        st.Page(P["deliveries"], title="Deliveries", icon=":material/package_2:"),
-        st.Page(P["route"], title="Route", icon=":material/route:"),
-        st.Page(P["report"], title="Report", icon=":material/campaign:"),
-        st.Page(P["history"], title="History", icon=":material/history:"),
+        st.Page(P["today"], title=i18n.t("nav_today"), icon=":material/today:", default=True),
+        st.Page(P["deliveries"], title=i18n.t("nav_deliveries"), icon=":material/package_2:"),
+        st.Page(P["route"], title=i18n.t("nav_route"), icon=":material/route:"),
+        st.Page(P["report"], title=i18n.t("nav_report"), icon=":material/campaign:"),
+        st.Page(P["history"], title=i18n.t("nav_history"), icon=":material/history:"),
     ]
 
 navigation = st.navigation(pages)
@@ -71,7 +77,11 @@ if last_page and role != "partner" and navigation.url_path == "" and last_page !
         st.switch_page(target)
 ui.sidebar_user()
 ui.live_updates()  # one refresh watcher for every page, at a fixed place in the sidebar
+escalation_ui.watcher(user)  # order offers: ring / call / alert timer (+ the partner's alarm), also in the sidebar
 if "_welcome" in st.session_state:
     st.toast(st.session_state.pop("_welcome"))
+if role == "partner":
+    live_ui.share_location(user)  # GPS every 30 s while on duty
+    escalation_ui.partner_overlay(user)  # full-screen card while an urgent order waits for Accept
 navigation.run()
 ui.mark_seen()  # this session's own writes don't trigger a refresh (one-time messages and passwords stay visible)

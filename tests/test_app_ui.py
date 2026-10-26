@@ -2,10 +2,10 @@
 import re
 
 import pytest
-from streamlit.testing.v1 import AppTest
-from streamlit.testing.v1 import element_tree
+from streamlit.testing.v1 import AppTest, element_tree
 
 from modules import auth, guards, store
+from modules import partner_scope as scope
 
 
 def _indices(self):  # AppTest expects lists; single-choice segmented controls hold one value
@@ -243,3 +243,114 @@ def test_assign_work_end_to_end(db):
     ok(at.switch_page(guards.PARTNER_PAGES["deliveries"]).run())          # every stop with its next step
     click(at, "Picked up")
     assert store.deliveries_df().set_index("delivery_id").loc[order_id, "status"] == "picked_up"
+
+
+def test_urgent_order_card_cant_take_and_one_click_reassign(db):
+    """An urgent order fills the partner's screen; Can't take alerts the admin, who reassigns it to the suggested
+    partner in one click; Deliveries shows the offer chip."""
+    from modules import assign
+
+    east = auth.get_user("east.admin")
+    order_id, _ = assign.create_order(east, "City Clinic", "+91 90000 30002", "Peelamedu", "Medicine", "medical",
+                                      "16:00", "small")
+    assign.assign(east, order_id, "DP102")
+    offer = lambda: store.deliveries_df().set_index("delivery_id").loc[order_id]  # noqa: E731
+
+    at = sign_in("DP102", "Partner@123")
+    assert "NEW URGENT ORDER" in text_of(at) and f"{order_id} · Medicine" in text_of(at)
+    assert offer()["offer_status"] == "seen"
+    click(at, "Can't take")
+    at.button_group(key=f"decline_reason_{order_id}").set_value("Too far").run()
+    click(at, "Send")
+    assert offer()["offer_status"] == "declined" and offer()["status"] == "unassigned"
+
+    page = _page_as(guards.BRANCH_PAGES["command"], east)
+    assert "Karthik can" in text_of(page) and "take it · Too far" in text_of(page)   # apostrophe is escaped
+    click(page, "Reassign to")
+    assert offer()["offer_status"] == "sent" and offer()["vehicle_id"] != "V2"
+
+    page = _page_as(guards.BRANCH_PAGES["deliveries"], east)
+    assert "📨 Sent" in page.dataframe[0].value["Offer"].tolist()
+
+
+def test_accepting_the_urgent_card_ends_the_alarm(db):
+    from modules import assign
+
+    east = auth.get_user("east.admin")
+    order_id, _ = assign.create_order(east, "KMCH Pharmacy", "+91 90000 30003", "Peelamedu", "Medicine", "medical",
+                                      "15:00", "small")
+    assign.assign(east, order_id, "DP102")
+    at = sign_in("DP102", "Partner@123")
+    click(at, "Accept")
+    row = store.deliveries_df().set_index("delivery_id").loc[order_id]
+    assert row["status"] == "accepted" and row["offer_status"] == "accepted"
+    assert "NEW URGENT ORDER" not in text_of(continue_session(at))
+
+
+def test_command_center_shows_likely_late_and_switches_weather(db):
+    from modules import predict
+
+    east = auth.get_user("east.admin")
+    page = ok(_page_as(guards.BRANCH_PAGES["command"], east))
+    assert "open stops likely late" in text_of(page) and "Late risk" in text_of(page)
+    page.button_group(key="weather_pick").set_value("heavy_rain").run()
+    assert predict.weather_now() == "heavy_rain"
+    assert "Heavy rain" in text_of(ok(_page_as(guards.BRANCH_PAGES["command"], east)))
+    page = ok(_page_as(guards.BRANCH_PAGES["deliveries"], east))
+    assert "Late risk" in page.dataframe[0].value.columns
+
+
+def test_admin_compares_and_applies_the_optimised_plan(db):
+    from modules import optimizer
+
+    if not optimizer.available():
+        pytest.skip("OR-Tools is not installed")
+    seen = scope.preview_issue("DP102", "CBE-E", text="avinasi rd la accident, full block, rendu mani neram aagum")
+    issue_id = scope.report_issue("DP102", "CBE-E", seen["problem"], transcript=seen["transcript"])
+    east = auth.get_user("east.admin")
+    page = ok(_page_as(guards.BRANCH_PAGES["disruptions"], east))
+    assert "Rule-based or optimised?" in text_of(page) and "Total km" in text_of(page)
+    page.button_group(key=f"choice_{issue_id}").set_value("optimised").run()
+    click(page, "Accept optimised plan")
+    issue = store.get_issue(issue_id)
+    assert issue["status"] == "accepted" and issue["plan"]["chosen"] == "optimised"
+
+
+def test_admin_skips_a_recommendation_and_insights_learns(db):
+    from modules import learning
+
+    seen = scope.preview_issue("DP102", "CBE-E", text="avinasi rd la accident, full block, rendu mani neram aagum")
+    issue_id = scope.report_issue("DP102", "CBE-E", seen["problem"], transcript=seen["transcript"])
+    east = auth.get_user("east.admin")
+    page = ok(_page_as(guards.BRANCH_PAGES["disruptions"], east))
+    first = store.get_issue(issue_id)["plan"]["actions"][0]["action_id"]
+    click(page, "Skip")
+    plan = store.get_issue(issue_id)["plan"]
+    assert plan["skipped"] == [first] and first not in [a["action_id"] for a in plan["actions"]]
+
+    page = ok(_page_as(guards.BRANCH_PAGES["insights"], east))
+    assert "Taken by action type" in text_of(page)
+    click(page, "Retrain now")                                     # 1 decision: explains what is missing
+    assert "Needs 20 decisions" in " ".join(w.value for w in page.warning)
+    learning.sample_history("CBE-E", n=40)
+    page = ok(_page_as(guards.BRANCH_PAGES["insights"], east))
+    click(page, "Retrain now")
+    assert learning.load_model()["rows"] == 41                     # 40 samples + the real skip
+
+
+def test_live_feeds_card_demo_traffic_check_and_create_alert(db):
+    east = auth.get_user("east.admin")
+    page = ok(_page_as(guards.BRANCH_PAGES["command"], east))
+    assert "Live feeds" in text_of(page) and "set by hand (Demo mode)" in text_of(page)
+    click(page, "Check traffic (demo)")
+    page = ok(_page_as(guards.BRANCH_PAGES["command"], east))
+    assert "traffic on Trichy Road" in text_of(page)
+    click(page, "Create alert")
+    [issue] = store.list_issues(branch_id="CBE-E")
+    assert issue["source"] == "auto-traffic" and issue["status"] == "analysed"
+
+
+def test_partner_app_renders_with_location_sharing(db):
+    at = sign_in("DP102", "Partner@123")
+    captions = " ".join(c.value for c in at.sidebar.caption)
+    assert "Location" in captions                                   # waiting for the browser (no JS in tests)

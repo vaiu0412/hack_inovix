@@ -5,7 +5,8 @@ import time
 
 import streamlit as st
 
-from modules import auth, guards, login_ui as lui
+from modules import auth, guards
+from modules import login_ui as lui
 
 VIEWS = ("signin", "otp", "forgot")
 PLACEHOLDER = "you@deport.in or DP102"
@@ -113,7 +114,9 @@ with st.container(key="login_page"):
                     st.rerun()
             else:
                 if st.session_state.get("otp_demo"):
-                    st.info(f"**DEMO** · code **{st.session_state['otp_demo']}** (no SMS set up)", icon=":material/sms:")
+                    st.info(
+                        f"**DEMO** · code **{st.session_state['otp_demo']}** (no SMS set up)", icon=":material/sms:"
+                    )
                 with st.form("otp_verify", border=False):
                     code = st.text_input("6-digit code", max_chars=6, key="otp_code", placeholder="••••••")
                     verify = st.form_submit_button("Sign in", type="primary", width="stretch")
@@ -147,7 +150,9 @@ with st.container(key="login_page"):
                 if send:
                     code, text, ok = auth.request_otp(ident, "reset")
                     if ok:
-                        st.session_state.update(reset_step=2, reset_ident=ident, reset_sent=time.time(), reset_demo=code)
+                        st.session_state.update(
+                            reset_step=2, reset_ident=ident, reset_sent=time.time(), reset_demo=code
+                        )
                         demo_code(code, "reset")
                         show(text, "success")
                     else:
@@ -159,7 +164,9 @@ with st.container(key="login_page"):
                             icon=":material/sms:")
                 with st.form("reset_new", border=False):
                     code = st.text_input("6-digit code", max_chars=6, key="reset_code")
-                    new = st.text_input("New password", type="password", key="reset_pw", help="8+ characters, a letter and a number")
+                    new = st.text_input(
+                        "New password", type="password", key="reset_pw", help="8+ characters, a letter and a number"
+                    )
                     confirm = st.text_input("Repeat password", type="password", key="reset_pw2")
                     save = st.form_submit_button("Save password", type="primary", width="stretch")
                 if save:

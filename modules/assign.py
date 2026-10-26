@@ -40,7 +40,8 @@ STAGE = {"unassigned": "Unassigned", "assigned": "New", "accepted": "Accepted", 
          "delayed": "Delayed", "rescheduled": "Rescheduled"}
 STAMP = {"accepted": "accepted_at", "picked_up": "picked_at", "delivered": "delivered_at"}
 PROOF_FOR = ("medical",)  # Delivered needs proof (modules/pod.py)
-CSV_COLUMNS = ["customer", "phone", "area", "category", "priority", "deadline", "package_size", "notes"]
+CSV_COLUMNS = ["customer", "phone", "area", "category", "priority", "deadline", "package_size", "notes", "email"]
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -66,9 +67,11 @@ def _next_id(conn):
     return f"D{max(numbers, default=0) + 1:02d}"
 
 
-def check_order(customer, phone, area, category, priority, deadline, package_size):
+def check_order(customer, phone, area, category, priority, deadline, package_size, email=""):
     """Problems with an order (short messages), or [] when it can be saved. Also returns the place."""
     problems = []
+    if str(email or "").strip() and not EMAIL_RE.match(str(email).strip()):
+        problems.append(f"Email doesn't look right: {email}.")
     if not str(customer or "").strip():
         problems.append("Customer is missing.")
     if not re.sub(r"\D", "", str(phone or "")):
@@ -87,11 +90,12 @@ def check_order(customer, phone, area, category, priority, deadline, package_siz
     return problems, place
 
 
-def create_order(actor, customer, phone, area, category, priority, deadline, package_size, notes=""):
-    """Save a new order as unassigned in the admin's branch. Returns (delivery_id, place)."""
+def create_order(actor, customer, phone, area, category, priority, deadline, package_size, notes="", email=""):
+    """Save a new order as unassigned in the admin's branch. Returns (delivery_id, place).
+    email (optional): the customer can then also sign in with a code sent there (customer portal)."""
     branch = _branch_admin(actor)
     deadline = str(deadline).strip()
-    problems, place = check_order(customer, phone, area, category, priority, deadline, package_size)
+    problems, place = check_order(customer, phone, area, category, priority, deadline, package_size, email)
     if problems:
         raise ValueError(" ".join(problems))
     deadline = min_to_hhmm(hhmm_to_min(deadline))
@@ -100,8 +104,8 @@ def create_order(actor, customer, phone, area, category, priority, deadline, pac
         conn.execute(
             "INSERT INTO deliveries(delivery_id, customer, address_area, lat, lng, vehicle_id, road_id, stop_order, "
             "planned_eta, deadline, priority, customer_phone, status, original_vehicle, branch_id, created_by, "
-            "created_at, package_size, category, notes) "
-            "VALUES (?,?,?,?,?,NULL,?,0,NULL,?,?,?,'unassigned',NULL,?,?,?,?,?,?)",
+            "created_at, package_size, category, notes, customer_email) "
+            "VALUES (?,?,?,?,?,NULL,?,0,NULL,?,?,?,'unassigned',NULL,?,?,?,?,?,?,?)",
             (
                 delivery_id,
                 str(customer).strip(),
@@ -118,6 +122,7 @@ def create_order(actor, customer, phone, area, category, priority, deadline, pac
                 package_size,
                 category,
                 str(notes or "").strip(),
+                str(email or "").strip().lower() or None,
             ),
         )
         store.log_event("delivery", f"New order {delivery_id} · {place['place']} · by {deadline}", branch_id=branch)
@@ -140,7 +145,7 @@ def validate_rows(df):
             row["package_size"].lower() or "small",
         )
         problems, _ = check_order(row["customer"], row["phone"], row["area"], row["category"], row["priority"],
-                                  row["deadline"], row["package_size"])
+                                  row["deadline"], row["package_size"], row.get("email", ""))
         if problems:
             errors.append((i, " ".join(problems)))
         else:
@@ -151,14 +156,15 @@ def validate_rows(df):
 def import_orders(actor, rows):
     """Create orders from validated CSV rows. Returns the new delivery ids."""
     return [create_order(actor, r["customer"], r["phone"], r["area"], r["category"], r["priority"], r["deadline"],
-                         r["package_size"], r.get("notes", ""))[0] for r in rows]
+                         r["package_size"], r.get("notes", ""), r.get("email", ""))[0] for r in rows]
 
 
 def csv_template():
     """The CSV text admins download to fill in new orders."""
     return pd.DataFrame([
         {"customer": "Anand Stores", "phone": "+91 90000 30001", "area": "Gandhipuram", "category": "Groceries",
-         "priority": "standard", "deadline": "14:30", "package_size": "medium", "notes": "Back gate"},
+         "priority": "standard", "deadline": "14:30", "package_size": "medium", "notes": "Back gate",
+         "email": "orders@anandstores.example"},
         {"customer": "City Clinic", "phone": "+91 90000 30002", "area": "RS Puram", "category": "Medicine",
          "priority": "medical", "deadline": "12:00", "package_size": "small", "notes": ""},
     ], columns=CSV_COLUMNS).to_csv(index=False)

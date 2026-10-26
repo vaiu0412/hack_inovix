@@ -63,6 +63,7 @@ with tab_new, ui.card("new_order"):
         customer = c1.text_input("Customer", placeholder="Anand Stores")
         phone = c2.text_input("Phone", placeholder="+91 90000 30001")
         area = st.text_input("Area", placeholder="Gandhipuram, RS Puram, KMCH …")
+        email = st.text_input("Customer email", placeholder="Optional – for order tracking sign-in")
         c3, c4, c5 = st.columns(3)
         category = c3.selectbox("Category", assign.CATEGORIES)
         priority = c4.selectbox("Priority", assign.PRIORITIES, index=3, format_func=str.capitalize)
@@ -74,13 +75,13 @@ with tab_new, ui.card("new_order"):
         save = save_col.form_submit_button("Save order", type="primary", icon=":material/add:", width="stretch")
     if check or save:
         problems, place = assign.check_order(customer, phone, area, category, priority, deadline.strftime("%H:%M"),
-                                             size or "small")
+                                             size or "small", email)
         st.session_state["new_order_place"] = place
         if save and problems:
             st.error(" ".join(problems), icon=":material/error:")
         elif save:
             order_id, place = assign.create_order(actor, customer, phone, area, category, priority,
-                                                  deadline.strftime("%H:%M"), size or "small", notes)
+                                                  deadline.strftime("%H:%M"), size or "small", notes, email)
             # kept in session: the live refresh reruns the page right after a save
             st.session_state["assign_msg"] = f"{order_id} saved · {place['place']}. It is in the queue."
             st.session_state["new_order_round"] = form_round + 1

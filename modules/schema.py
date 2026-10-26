@@ -58,7 +58,7 @@ deliveries = _table(
     _t("delivered_at"), _t("package_size", "small"), _t("category"), _t("notes", ""), _t("proof_note", ""),
     _t("offer_status"), _t("offered_at"), _t("seen_at"), _i("escalation_level", 0), _t("track_code"), _t("pod_method"),
     _t("pod_at"), _t("pod_photo_path"), _t("pod_signature_path"), _t("pod_code_hash"), _f("pod_code_expires"),
-    _i("pod_code_attempts", 0))
+    _i("pod_code_attempts", 0), _t("customer_email"))
 assignment_history = _table("assignment_history", _id(), _t("delivery_id", nullable=False), _t("from_dp"),
                             _t("to_dp"), _t("by_user"), _t("reason"), _t("time"), _t("branch_id"), autoincrement=True)
 issues = _table(

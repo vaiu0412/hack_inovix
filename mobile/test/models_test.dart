@@ -36,6 +36,17 @@ void main() {
     expect(Endpoints.resolve(Endpoints.me), ('GET', '/me'));
   });
 
+  test('a customer order', () {
+    final o = CustomerOrder.fromJson({
+      'delivery_id': 'D07', 'area': 'Ukkadam', 'status': 'in_transit', 'stage': 'On the way', 'eta': '09:15',
+      'deadline': '11:00', 'partner_first_name': 'Karthik', 'vehicle': 'bike', 'proof': false,
+      'track_url': 'https://example.com/track?code=abc',
+    });
+    expect(o.step, 3);
+    expect(o.done, isFalse);
+    expect(CustomerOrder.fromJson({'status': 'delivered', 'proof': true}).done, isTrue);
+  });
+
   test('profile and live change', () {
     final p = Profile.fromJson({'partner_id': 'DP102', 'name': 'Karthik R', 'status': 'on_duty', 'rating': 4.5});
     expect(p.onDuty, isTrue);

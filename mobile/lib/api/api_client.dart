@@ -38,6 +38,19 @@ class ApiClient {
 
   String? get accessToken => _access;
 
+  /// The signed-in role from the access token ('partner' or 'customer'); read only to pick the screens –
+  /// the server checks the token on every call.
+  String? get role {
+    final parts = (_access ?? '').split('.');
+    if (parts.length != 3) return null;
+    try {
+      final claims = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1])))) as Map<String, dynamic>;
+      return claims['role'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ---------------------------------------------------------------- session
   Future<User> signIn(String identifier, String password) async {
     final body = await _call(Endpoints.login,
@@ -47,7 +60,28 @@ class ApiClient {
     final user = User.fromJson((body['user'] as Map).cast<String, dynamic>());
     if (!user.isPartner) {
       await signOut();
-      throw ApiException(403, 'This app is for delivery partners.');
+      throw ApiException(403, user.isCustomer ? 'Customers sign in with a code.' : 'Use the web app for admin accounts.');
+    }
+    return user;
+  }
+
+  /// Ask for a 6-digit sign-in code by SMS or email (partners and customers). Returns (message, DEMO code or null).
+  Future<(String, String?)> requestCode(String identifier, {String? channel}) async {
+    final body = await _call(Endpoints.codeRequest,
+        json: {'identifier': identifier.trim(), if (channel != null) 'channel': channel}, auth: false);
+    return (body['message'] as String, body['demo_code'] as String?);
+  }
+
+  /// Sign in with the code that arrived. Partners and customers only (admins use the web app).
+  Future<User> signInWithCode(String identifier, String code) async {
+    final body = await _call(Endpoints.codeVerify,
+        json: {'identifier': identifier.trim(), 'code': code.trim(), 'remember_me': true}, auth: false);
+    _access = body['token'] as String;
+    await _tokens.saveRefresh(body['refresh_token'] as String);
+    final user = User.fromJson((body['user'] as Map).cast<String, dynamic>());
+    if (!user.isPartner && !user.isCustomer) {
+      await signOut();
+      throw ApiException(403, 'Use the web app for admin accounts.');
     }
     return user;
   }
@@ -93,6 +127,9 @@ class ApiClient {
       _list(body['unread_messages']).map(Message.fromJson).toList(),
     );
   }
+
+  Future<List<CustomerOrder>> myOrders() async =>
+      _list(await _call(Endpoints.myOrders)).map(CustomerOrder.fromJson).toList();
 
   Future<List<Delivery>> deliveries() async => _list(await _call(Endpoints.deliveries)).map(Delivery.fromJson).toList();
   Future<List<Delivery>> offers() async => _list(await _call(Endpoints.offers)).map(Delivery.fromJson).toList();

@@ -87,6 +87,11 @@ flowchart LR
   PostGIS); a mobile **REST API with JWT** access tokens tied to revocable sessions; **WebSockets** (`/ws/partner`,
   `/ws/admin`) streaming offers, alerts and messages from a transactional change feed; **Firebase push** for new
   offers, sent only after the commit.
+- **Customers sign in and track their orders** ([`docs/CUSTOMERS.md`](docs/CUSTOMERS.md)): a 6-digit code by SMS
+  (Twilio Verify or Twilio SMS) or email (SMTP) to the mobile number or email on their order – no registration;
+  **My orders** shows each order's live stage, ETA, partner's first name and map, then the delivered ones. Staff can
+  sign in with a code by email or SMS too. Codes are hashed, single-use, rate-limited, and never shown on screen
+  on a real site.
 - **Partner phone app** ([`docs/MOBILE.md`](docs/MOBILE.md)): a Flutter app in `mobile/` – today, orders, full-screen
   offers, proof of delivery, voice/photo reports, inbox; live feed, push, location while on duty, and an offline
   queue for status updates. Source only (not compiled here); its API contract is tested in the Python suite.
@@ -132,6 +137,7 @@ For judges and this README only – never shown in the app.
 | Branch Admin – East | `east.admin@deport.in` | `Admin@123` |
 | Branch Admin – Central / South | `central.admin@deport.in` / `south.admin@deport.in` | `Admin@123` |
 | Delivery Partner | `DP101`…`DP106` (DP102 = Karthik, DP106 = Lakshmi, backup van) | `Partner@123` |
+| Customer (**Customer? Track your orders**) | the mobile number on an order, e.g. `90000 10007` (D07) | a code by SMS – shown as DEMO when `DEMO_MODE`/`OTP_DEMO` is on |
 
 ## Demo script
 1. **Phone:** `DP102` → **Report** → *Accident* + "avinashi road accident, full block, 2 hours" → **Check** → **Send**.
@@ -153,7 +159,7 @@ For judges and this README only – never shown in the app.
 ## Project structure
 ```
 app.py         sign-in first, then role-based navigation (or the public /track page)
-views/         pages: manager/ · partner/ · super/ · login · console
+views/         pages: manager/ · partner/ · customer/ · super/ · login · console · track (public)
 modules/       engine (store, auth, parser, voice, impact, risk, recommender, operations, assign, escalation, predict, optimizer, learning, tracking, realtime,
                geometry, places, pod, analytics, i18n, db, schema, tokens) + UI helpers (ui, manager_ui, partner_ui, report_ui,
                login_ui, escalation_ui, live_map, track_ui, graph_viz)
@@ -166,7 +172,7 @@ api/           FastAPI REST (JWT) + WebSockets (live.py) for the mobile app, Twi
 migrations/    Alembic migrations for PostgreSQL (SQLite needs none)
 mobile/        Flutter partner app (JWT API, live feed, push, background location, offline queue) – docs/MOBILE.md
 data/          demo data with real Coimbatore coordinates + cached road shapes
-tests/         245 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, live data,
+tests/         258 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, live data,
                product: photos, tracking, proof, analytics, Tamil · platform: PostgreSQL, JWT, WebSockets, push ·
                API, headless UI) – on SQLite, and on PostgreSQL in CI
 ```
@@ -192,7 +198,8 @@ Everything runs with **no keys at all** (Demo mode, clearly labelled). Real serv
 | Real voice calls when an order isn't answered | Twilio account + number, public API URL | simulated call in the app |
 | WhatsApp to customers, delivery codes | Twilio WhatsApp or WhatsApp Business (Meta) | drafts for the admin; DEMO code on screen |
 | Live weather / traffic | OpenWeatherMap / TomTom keys | hand switch / scripted demo jam |
-| OTP by email, Google sign-in | SMTP account; Google OAuth client | DEMO code on screen; button hidden |
+| Sign-in codes by email / SMS (staff, customers) | SMTP account; Twilio (Verify service or SMS number) | code sign-in off – DEMO code on screen only with `DEMO_MODE`/`OTP_DEMO` |
+| Google sign-in | Google OAuth client | button hidden |
 | Push to the partner's phone | Firebase project + service account | live feed and in-app ring only |
 | PostgreSQL + PostGIS | a database server (`DATABASE_URL`) | one SQLite file |
 | The phone app on a device | Flutter SDK + Android Studio (and Firebase for push) | source only, not built here |

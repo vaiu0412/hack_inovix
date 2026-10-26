@@ -76,7 +76,7 @@ def test_every_field_the_app_reads_is_in_the_responses(client):
     login = client.post("/login", json={"identifier": "DP102", "password": "Partner@123"}).json()
     client_source = dart("api/api_client.dart")
     for key in re.findall(r"body\['(\w+)'\]", client_source):
-        if key in ("demo_code", "used", "profile", "unread_messages", "detail"):
+        if key in ("demo_code", "used", "profile", "unread_messages", "detail", "message"):
             continue  # other responses, checked below
         assert key in login, key
     refused = client.post("/login", json={"identifier": "DP102", "password": "wrong"})
@@ -107,3 +107,13 @@ def test_every_field_the_app_reads_is_in_the_responses(client):
     assert client.post("/me/location", headers=headers, json={"lat": 11.0, "lng": 76.96}).json()["used"] is True
     code = client.post("/me/deliveries/D07/pod/code", headers=headers).json()
     assert "demo_code" in code
+
+
+def test_code_sign_in_and_customer_orders_match_the_app(client):
+    sent = client.post("/otp/request", json={"identifier": "90000 10007"}).json()
+    client_source = dart("api/api_client.dart")
+    assert {"message", "demo_code"} <= set(sent) and "body['message']" in client_source
+    login = client.post("/otp/verify", json={"identifier": "90000 10007", "code": sent["demo_code"]}).json()
+    assert fields_read("User") <= set(login["user"]) and login["user"]["role"] == "customer"
+    orders = client.get("/my/orders", headers={"Authorization": f"Bearer {login['token']}"}).json()
+    assert orders and fields_read("CustomerOrder") <= set(orders[0])

@@ -2,6 +2,10 @@
 /// one against the real FastAPI routes, so the app and the server can't drift apart unnoticed.
 class Endpoints {
   static const login = 'POST /login';
+  static const codeRequest = 'POST /otp/request';
+  static const codeVerify = 'POST /otp/verify';
+  static const myOrders = 'GET /my/orders';
+  static const myOrder = 'GET /my/orders/{id}';
   static const refresh = 'POST /token/refresh';
   static const logout = 'POST /logout';
   static const me = 'GET /me';

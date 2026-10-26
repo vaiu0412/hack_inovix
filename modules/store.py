@@ -26,7 +26,7 @@ from modules import db, geometry, schema
 from modules.data_loader import DATA_DIR, hhmm_to_min, load_all, load_branches, load_partners, nearest_place
 from modules.security import demo_hash
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 ORDER_COLUMNS = {  # work assignment (v6): who created / assigned / handled an order, and when
     "created_by": "TEXT", "created_at": "TEXT", "assigned_at": "TEXT", "assigned_by": "TEXT", "accepted_at": "TEXT",
     "picked_at": "TEXT", "delivered_at": "TEXT", "package_size": "TEXT DEFAULT 'small'", "category": "TEXT",
@@ -53,11 +53,12 @@ PRIVATE_COLUMNS = ("pod_code_hash", "pod_code_expires", "pod_code_attempts")  # 
 JSON_FIELDS = {"problem", "plan"}
 OPEN_ISSUE_STATUSES = ("new", "analysed")
 
-ROLES = ("super_admin", "branch_admin", "partner")
+ROLES = ("super_admin", "branch_admin", "partner", "customer")
 ROLE_PERMISSIONS = {
     "super_admin": ["manage_branches", "manage_branch_admins", "view_all_branches", "view_audit_log", "reset_demo"],
     "branch_admin": ["manage_partners", "view_branch_ops", "approve_recovery", "log_issue"],
     "partner": ["report_issue", "view_own_deliveries"],
+    "customer": ["view_own_orders"],
 }
 # Demo accounts (also listed in the README; never shown in the app).
 DEMO_ADMINS = [
@@ -280,6 +281,8 @@ def _init_db():
             _migrate_v11(conn)
         if current < 12:
             _set_version(conn, 12)  # devices for push + the change feed behind the WebSockets: tables from SCHEMA
+        if current < 13:
+            _migrate_v13(conn)
         conn.executescript(schema.sqlite_index_ddl())  # after the upgrades, so every indexed column exists
         _fill_track_codes(conn)  # every delivery has a customer tracking link
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:  # data but no accounts: add the demo ones
@@ -302,6 +305,9 @@ def _init_postgres():
         reset_demo(backup=False)
         return
     with connect() as conn:
+        row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+        if int(row["value"] if row else 0) < 13:
+            _migrate_v13(conn)
         _fill_track_codes(conn)
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             _seed_users(conn)
@@ -465,6 +471,14 @@ def _migrate_v11(conn):
             if column not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
     _set_version(conn, 11)
+
+
+def _migrate_v13(conn):
+    """Customer portal: the customer's email on an order (sign-in codes by email) and the customer role."""
+    if getattr(conn, "backend", "sqlite") == "sqlite" and "customer_email" not in _columns(conn, "deliveries"):
+        conn.execute("ALTER TABLE deliveries ADD COLUMN customer_email TEXT")
+    _seed_reference(conn)  # adds the customer role + its permission (INSERT OR IGNORE)
+    _set_version(conn, 13)
 
 
 def _fill_track_codes(conn):

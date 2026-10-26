@@ -1,6 +1,7 @@
-"""Sign-in page – the only public page. One card, three views: sign in · OTP · forgot password.
-The role comes from the account, so everyone lands on their own dashboard. (Super Admins use the
-separate console at /console; this page never links to it.)"""
+"""Sign-in page – the only public page. One card, three views: sign in · one-time code · forgot password.
+The role comes from the account, so everyone lands on their own dashboard. Customers use the code view
+("Track your orders"): a code to the mobile number or email on their orders. (Super Admins use the separate
+console at /console; this page never links to it.)"""
 import time
 
 import streamlit as st
@@ -89,24 +90,34 @@ with st.container(key="login_page"):
                 if st.button("Continue with Google", key="google_btn", width="stretch"):
                     st.login("google")
             if st.button("Sign in with OTP", icon=":material/mail:", key="otp_btn", width="stretch"):
-                go("otp", otp_step=1)
+                go("otp", otp_step=1, otp_who="staff")
+                st.rerun()
+            if st.button("Customer? Track your orders", icon=":material/local_shipping:", key="customer_btn",
+                         width="stretch"):
+                go("otp", otp_step=1, otp_who="customer")
                 st.rerun()
             if lui.demo_mode():
                 lui.demo_chips(["branch_admin", "partner"])
 
         # ------------------------------------------------ OTP sign-in
         elif view == "otp":
-            st.markdown("<p class='lg-title'>Sign in with OTP</p><p class='lg-sub2'>Code to your email</p>",
-                        unsafe_allow_html=True)
+            customer = st.session_state.get("otp_who") == "customer"
+            title, sub = (("Track your orders", "Code to the mobile or email on your order") if customer
+                          else ("Sign in with OTP", "Code to your email or mobile"))
+            st.markdown(f"<p class='lg-title'>{title}</p><p class='lg-sub2'>{sub}</p>", unsafe_allow_html=True)
             flash()
             if st.session_state.get("otp_step", 1) == 1:
                 with st.form("otp_send", border=False):
-                    ident = st.text_input("Email or ID", placeholder=PLACEHOLDER, key="otp_id")
+                    ident = st.text_input("Mobile number or email" if customer else "Email, ID or mobile",
+                                          placeholder="98765 43210 or you@mail.com" if customer else PLACEHOLDER,
+                                          key="otp_id")
+                    by_sms = False if customer else st.checkbox("Send by SMS", key="otp_by_sms")
                     send = st.form_submit_button("Send code", type="primary", width="stretch")
                 if send:
-                    code, text, ok = auth.request_otp(ident, "login")
+                    code, text, ok = auth.request_otp(ident, "login", channel="sms" if by_sms else None)
                     if ok:
-                        st.session_state.update(otp_step=2, otp_ident=ident, otp_sent=time.time(), otp_demo=code)
+                        st.session_state.update(otp_step=2, otp_ident=ident, otp_sent=time.time(), otp_demo=code,
+                                                otp_channel="sms" if by_sms else None)
                         demo_code(code, "sign-in")
                         show(text, "success")
                     else:
@@ -114,9 +125,8 @@ with st.container(key="login_page"):
                     st.rerun()
             else:
                 if st.session_state.get("otp_demo"):
-                    st.info(
-                        f"**DEMO** · code **{st.session_state['otp_demo']}** (no SMS set up)", icon=":material/sms:"
-                    )
+                    st.info(f"**DEMO** · code **{st.session_state['otp_demo']}** (no email / SMS set up)",
+                            icon=":material/sms:")
                 with st.form("otp_verify", border=False):
                     code = st.text_input("6-digit code", max_chars=6, key="otp_code", placeholder="••••••")
                     verify = st.form_submit_button("Sign in", type="primary", width="stretch")
@@ -129,13 +139,14 @@ with st.container(key="login_page"):
                 wait = guards.resend_wait("otp_sent")
                 if st.button(f"Resend code{f' ({wait}s)' if wait else ''}", disabled=bool(wait), width="stretch",
                              key="otp_resend"):
-                    code, text, ok = auth.request_otp(st.session_state.get("otp_ident"), "login")
+                    code, text, ok = auth.request_otp(st.session_state.get("otp_ident"), "login",
+                                                      channel=st.session_state.get("otp_channel"))
                     st.session_state.update(otp_sent=time.time(), otp_demo=code)
                     demo_code(code, "sign-in")
                     show(text, "success" if ok else "error")
                     st.rerun()
             if st.button("Back to sign in", icon=":material/arrow_back:", type="tertiary", key="otp_back"):
-                go("signin", otp_step=1, otp_demo=None)
+                go("signin", otp_step=1, otp_demo=None, otp_who="staff", otp_channel=None)
                 st.rerun()
 
         # ------------------------------------------------ forgot password

@@ -20,6 +20,7 @@ class User {
   final String userId, name, role;
   final String? dpId, branchId, branchName;
   bool get isPartner => role == 'partner' && dpId != null;
+  bool get isCustomer => role == 'customer';
 }
 
 class Profile {
@@ -142,4 +143,34 @@ class LiveChange {
   final int id;
   final String kind;
   final Map<String, dynamic> data;
+}
+
+/// A customer's order (/my/orders): only what the customer may see – no phone numbers, no other stops.
+class CustomerOrder {
+  CustomerOrder.fromJson(Map<String, dynamic> j)
+      : id = _s(j['delivery_id']),
+        area = _s(j['area']),
+        status = _s(j['status']),
+        stage = _s(j['stage']),
+        eta = _s(j['eta']),
+        deadline = _s(j['deadline']),
+        partnerFirstName = _s(j['partner_first_name']),
+        vehicle = _s(j['vehicle']),
+        deliveredAt = _s(j['delivered_at']),
+        proof = j['proof'] == true,
+        branch = _s(j['branch']),
+        trackUrl = _s(j['track_url']);
+
+  final String id, area, status, stage, eta, deadline, partnerFirstName, vehicle, deliveredAt, branch, trackUrl;
+  final bool proof;
+  bool get done => status == 'delivered' || status == 'failed';
+
+  /// 0..4 along Order received → Partner assigned → Picked up → On the way → Delivered.
+  int get step => switch (status) {
+        'unassigned' => 0,
+        'assigned' || 'accepted' => 1,
+        'picked_up' => 2,
+        'delivered' => 4,
+        _ => 3,
+      };
 }

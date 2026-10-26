@@ -1,0 +1,23 @@
+<!--
+  Add these to android/app/src/main/AndroidManifest.xml after `flutter create` made the android/ folder
+  (see mobile/README.md, step 3). Permissions go inside <manifest>, before <application>.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- position every 30 s while on duty, also in the background (shown as a notification) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- new-order notifications (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- voice notes for issue reports -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!--
+      On the existing <application> tag add, for a local http:// API while developing only:
+          android:usesCleartextTraffic="true"
+      (a real deployment uses https:// and wss://, so leave it out of release builds)
+    -->
+</manifest>

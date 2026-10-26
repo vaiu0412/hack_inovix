@@ -87,6 +87,9 @@ flowchart LR
   PostGIS); a mobile **REST API with JWT** access tokens tied to revocable sessions; **WebSockets** (`/ws/partner`,
   `/ws/admin`) streaming offers, alerts and messages from a transactional change feed; **Firebase push** for new
   offers, sent only after the commit.
+- **Partner phone app** ([`docs/MOBILE.md`](docs/MOBILE.md)): a Flutter app in `mobile/` – today, orders, full-screen
+  offers, proof of delivery, voice/photo reports, inbox; live feed, push, location while on duty, and an offline
+  queue for status updates. Source only (not compiled here); its API contract is tested in the Python suite.
 
 ## Tech stack
 | Area | Used |
@@ -161,8 +164,9 @@ i18n/          en.json + ta.json (partner app texts)
 ml/            synthetic history, LightGBM training, history summary   models/   exported delay models (JSON)
 api/           FastAPI REST (JWT) + WebSockets (live.py) for the mobile app, Twilio webhooks, background timers
 migrations/    Alembic migrations for PostgreSQL (SQLite needs none)
+mobile/        Flutter partner app (JWT API, live feed, push, background location, offline queue) – docs/MOBILE.md
 data/          demo data with real Coimbatore coordinates + cached road shapes
-tests/         241 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, live data,
+tests/         244 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, live data,
                product: photos, tracking, proof, analytics, Tamil · platform: PostgreSQL, JWT, WebSockets, push ·
                API, headless UI) – on SQLite, and on PostgreSQL in CI
 ```
@@ -176,7 +180,7 @@ tests/         241 tests (flows, RBAC, persistence, assignment, escalation, ML, 
 - [x] Real-world data: live GPS, weather, traffic
 - [x] Photo reports, customer tracking link, proof of delivery, analytics, Tamil UI
 - [x] Platform: PostgreSQL/PostGIS, JWT API, WebSockets, push
-- [ ] Flutter partner app
+- [x] Flutter partner app – source in `mobile/` (not built here: needs the Flutter SDK, see `docs/MOBILE.md`)
 
 ## Known limits
 Simulated clock (09:00) and demo data; routing uses named roads (no live traffic yet); Google sign-in and SMTP need

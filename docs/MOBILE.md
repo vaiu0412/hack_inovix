@@ -22,9 +22,12 @@ How to run it: [`mobile/README.md`](../mobile/README.md).
 ```
 
 ## Flows
-- **Sign-in:** `POST /login` → a 60-minute JWT (memory) + the session's refresh token (secure storage). A 401 refreshes
-  once (`POST /token/refresh`); a refresh that fails (session ended, user deactivated) returns to the sign-in screen.
-  Only partner accounts are accepted. Restarting the app resumes the session without a password.
+- **Sign-in:** `POST /login` (partners: ID + password) or a code (`POST /otp/request` → SMS/email →
+  `POST /otp/verify`; partners and customers) → a 60-minute JWT (memory) + the session's refresh token (secure
+  storage). A 401 refreshes once (`POST /token/refresh`); a refresh that fails returns to the sign-in screen.
+  Admin accounts are refused (web only). Restarting the app resumes the session without a password.
+- **Customers:** after code sign-in they get **My orders** (`GET /my/orders`, every 30 s): stage, ETA, partner's
+  first name, a progress bar and *Live map* (the public tracking page). No live feed, push, location or queue.
 - **New order:** the server offers it (escalation level 0) → `offer` change on the live feed and, with Firebase, a
   push → the app opens the **full-screen offer** once per order and tells the server it was seen
   (`POST /me/offers/seen`, *Sent → Seen* on the admin's timeline). **Accept** or **Can't take** + reason.

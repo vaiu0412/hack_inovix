@@ -44,7 +44,8 @@ ISSUE_STATUS = {"new": ("Needs place", "delayed"), "analysed": ("Waiting", "crit
                 "accepted": ("Plan applied", "normal"), "rejected": ("Rejected", "off")}
 ROLE_BADGES = {"super_admin": ("Super Admin", "rp-super", "#7C3AED"),
                "branch_admin": ("Branch Admin", "rp-brand", BRAND),
-               "partner": ("Partner", "rp-low", "#16A34A")}
+               "partner": ("Partner", "rp-low", "#16A34A"),
+               "customer": ("Customer", "rp-neutral", "#0EA5E9")}
 
 
 # ---------------------------------------------------------------- page shell
@@ -350,6 +351,8 @@ def sidebar_user():
     user = st.session_state["user"]
     label, css, colour = ROLE_BADGES[user["role"]]
     line = user.get("email") or user["user_id"]
+    if user["role"] == "customer":
+        line = user.get("phone") or user.get("email") or ""
     if user["role"] == "partner":
         from modules import partner_scope
 

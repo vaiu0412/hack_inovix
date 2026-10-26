@@ -33,6 +33,9 @@ BRANCH_PAGES = {
     "insights": "views/manager/insights.py",
     "analytics": "views/manager/analytics.py",
 }
+CUSTOMER_PAGES = {
+    "orders": "views/customer/orders.py",
+}
 PARTNER_PAGES = {
     "today": "views/partner/today.py",
     "deliveries": "views/partner/my_deliveries.py",

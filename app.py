@@ -12,6 +12,7 @@ import streamlit as st
 
 from modules import escalation_ui, guards, i18n, live_ui, track_ui, ui
 from modules.guards import BRANCH_PAGES as B
+from modules.guards import CUSTOMER_PAGES as C
 from modules.guards import PARTNER_PAGES as P
 from modules.guards import SUPER_PAGES as S
 
@@ -21,7 +22,7 @@ if track_ui.requested():  # a customer's tracking link: public, no sign-in, noth
     st.stop()
 user = guards.restore()
 role = user["role"] if user else None
-ui.setup_page(layout="centered" if role == "partner" else "wide", role=role)
+ui.setup_page(layout="centered" if role in ("partner", "customer") else "wide", role=role)
 guards.flush_cookie_ops()
 
 def _to_sign_in():
@@ -31,7 +32,7 @@ def _to_sign_in():
 if user is None:
     # the admin console lives at /console (file stem = URL path); the public page never links to it.
     # Links to signed-in pages (e.g. after signing out on /map_ops) go to the sign-in page, not "Page not found".
-    known = {Path(path).stem for path in (*S.values(), *B.values(), *P.values())}
+    known = {Path(path).stem for path in (*S.values(), *B.values(), *P.values(), *C.values())}
     st.navigation([st.Page("views/login.py", title="Sign in", icon=":material/login:", default=True),
                    st.Page("views/console.py", title="Console", icon=":material/lock:")]
                   + [st.Page(_to_sign_in, title="Sign in", url_path=stem) for stem in sorted(known)],
@@ -57,6 +58,8 @@ elif role == "branch_admin":
         st.Page(B["insights"], title="Insights", icon=":material/insights:"),
         st.Page(B["analytics"], title="Analytics", icon=":material/analytics:"),
     ]
+elif role == "customer":
+    pages = [st.Page(C["orders"], title="My orders", icon=":material/package_2:", default=True)]
 else:
     i18n.load(user)  # Tamil or English, as the partner chose last time
     pages = [

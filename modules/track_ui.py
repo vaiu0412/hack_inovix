@@ -40,16 +40,19 @@ def render():
     @st.fragment(run_every="30s")
     def _live():
         delivery = store.delivery_by_code(code)
-        _status(delivery)
+        status_card(delivery)
 
     _live()
 
 
-def _status(d):
+def status_card(d, key="track", with_map=True):
+    """One delivery as the customer sees it (public tracking page and the customer portal): stage, ETA, steps,
+    the partner's first name, and – while it is on its way – a small map. key keeps widgets apart when a page
+    shows several deliveries."""
     step = STEP_OF.get(d["status"], "received")
     reached = [key for key, _ in STEPS][: [key for key, _ in STEPS].index(step) + 1]
     partner = _partner(d)
-    with ui.card("track_status"):
+    with ui.card(f"{key}_status"):
         st.markdown(f"<p class='dp-small' style='font-weight:700;letter-spacing:.06em'>DELIVERY "
                     f"{escape(d['delivery_id'])}</p><p class='dp-h2' style='margin:2px 0 6px'>"
                     f"{escape(dict(STEPS)[step])}</p>",
@@ -69,8 +72,8 @@ def _status(d):
         if partner and d["status"] not in ("delivered", "failed", "unassigned"):
             st.markdown(ui.kv([("Your partner", escape(partner["first_name"])),
                                ("Vehicle", escape(partner["vehicle"].title()))]), unsafe_allow_html=True)
-    if d["status"] not in ("delivered", "failed"):
-        _map(d, partner)
+    if with_map and d["status"] not in ("delivered", "failed"):
+        _map(d, partner, key)
     st.caption(f"Area: {d['address_area']} · updates every 30 s")
 
 
@@ -86,7 +89,7 @@ def _partner(d):
             "lat": row["current_lat"], "lng": row["current_lng"]}
 
 
-def _map(d, partner):
+def _map(d, partner, key="track"):
     point = (float(d["lat"]), float(d["lng"]))
     m = folium.Map(location=point, zoom_start=14, tiles=None, scrollWheelZoom=False, zoom_control=False)
     m.get_root().header.add_child(folium.Element(live_map.MAP_CSS))
@@ -99,4 +102,4 @@ def _map(d, partner):
                                                f"{live_map.VEHICLE_EMOJI.get(partner['vehicle'], '🚚')}</div>",
                                           icon_size=(34, 34), icon_anchor=(17, 17))).add_to(m)
         m.fit_bounds([point, here], padding=(30, 30))
-    st_folium(m, height=260, use_container_width=True, key="track_map", returned_objects=[])
+    st_folium(m, height=260, use_container_width=True, key=f"{key}_map", returned_objects=[])

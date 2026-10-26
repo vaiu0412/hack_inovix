@@ -166,7 +166,7 @@ api/           FastAPI REST (JWT) + WebSockets (live.py) for the mobile app, Twi
 migrations/    Alembic migrations for PostgreSQL (SQLite needs none)
 mobile/        Flutter partner app (JWT API, live feed, push, background location, offline queue) – docs/MOBILE.md
 data/          demo data with real Coimbatore coordinates + cached road shapes
-tests/         244 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, live data,
+tests/         245 tests (flows, RBAC, persistence, assignment, escalation, ML, optimiser, learning, live data,
                product: photos, tracking, proof, analytics, Tamil · platform: PostgreSQL, JWT, WebSockets, push ·
                API, headless UI) – on SQLite, and on PostgreSQL in CI
 ```
@@ -182,7 +182,34 @@ tests/         244 tests (flows, RBAC, persistence, assignment, escalation, ML, 
 - [x] Platform: PostgreSQL/PostGIS, JWT API, WebSockets, push
 - [x] Flutter partner app – source in `mobile/` (not built here: needs the Flutter SDK, see `docs/MOBILE.md`)
 
+## What needs real keys or accounts
+Everything runs with **no keys at all** (Demo mode, clearly labelled). Real services switch on per key – see
+[`.env.example`](.env.example):
+
+| To get | You need | Without it |
+|---|---|---|
+| AI understanding of reports, vision for photos | Groq or Gemini API key | offline Tamil/English rules; partner taps the type |
+| Real voice calls when an order isn't answered | Twilio account + number, public API URL | simulated call in the app |
+| WhatsApp to customers, delivery codes | Twilio WhatsApp or WhatsApp Business (Meta) | drafts for the admin; DEMO code on screen |
+| Live weather / traffic | OpenWeatherMap / TomTom keys | hand switch / scripted demo jam |
+| OTP by email, Google sign-in | SMTP account; Google OAuth client | DEMO code on screen; button hidden |
+| Push to the partner's phone | Firebase project + service account | live feed and in-app ring only |
+| PostgreSQL + PostGIS | a database server (`DATABASE_URL`) | one SQLite file |
+| The phone app on a device | Flutter SDK + Android Studio (and Firebase for push) | source only, not built here |
+
 ## Known limits
-Simulated clock (09:00) and demo data; routing uses named roads (no live traffic yet); Google sign-in and SMTP need
-your own keys; Streamlit Community Cloud storage is temporary – use a persistent disk or PostgreSQL
-([`docs/DEPLOY.md`](docs/DEPLOY.md), [`docs/PLATFORM.md`](docs/PLATFORM.md)).
+- Simulated clock (09:00) and synthetic demo data; the delay model is trained on a synthetic 60-day history.
+- Streamlit Community Cloud storage is temporary – use a persistent disk or PostgreSQL
+  ([`docs/DEPLOY.md`](docs/DEPLOY.md), [`docs/PLATFORM.md`](docs/PLATFORM.md)); photos and voice notes are files.
+- Live updates reach the API's WebSockets by polling a change table once a second (no `LISTEN/NOTIFY` yet); the
+  Streamlit screens keep polling.
+- The Flutter app has not been compiled here; its API contract is tested, its screens are not.
+- Business-initiated WhatsApp messages need approved templates on the Cloud API; there are no delivery receipts yet.
+- Admin pages and server-written texts (plan reasons, AI summaries) are English only; the partner web pages are
+  Tamil or English.
+
+## Verified end to end
+`tests/test_full_demo.py` walks the whole judges' demo on SQLite and PostgreSQL: sign in → assign an urgent order →
+no answer → ring → AI call (simulated) → keypad 1 accepts → the admin's live feed shows it → accident reported →
+predicted delays → optimised plan accepted (API) → partners told → the customer's tracking page shows the new ETA →
+analytics show the disruption and the answer time. The same story was also clicked through in the browser.

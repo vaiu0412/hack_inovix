@@ -646,12 +646,18 @@ def edit_issue(issue_id: int, body: IssueEdit, user=Depends(branch_admin_only)):
 
 
 @app.post("/issues/{issue_id}/accept")
-def accept(issue_id: int, user=Depends(branch_admin_only)):
-    """Accept the recommended plan: routes, ETAs, messages and history update in one transaction."""
+def accept(issue_id: int, choice: str = Query("rules", pattern="^(rules|optimised)$"),
+           user=Depends(branch_admin_only)):
+    """Accept the recommended plan (choice=rules) or the OR-Tools optimised one (choice=optimised): routes, ETAs,
+    messages and history update in one transaction. 409 when there is no optimised plan for this alert."""
     issue = _issue_or_404(issue_id, user["branch_id"])
     if issue["status"] != "analysed":
         raise HTTPException(409, f"Issue is '{issue['status']}', not waiting for a decision")
-    summary = operations.accept(issue_id, decided_by=user["display_name"], branch_id=user["branch_id"])
+    try:
+        summary = operations.accept(issue_id, decided_by=user["display_name"], branch_id=user["branch_id"],
+                                    choice=choice)
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
     return {
         "summary": summary,
         "issue": _public(store.get_issue(issue_id)),

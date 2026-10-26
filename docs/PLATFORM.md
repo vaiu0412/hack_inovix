@@ -47,7 +47,7 @@ as before, and the demo is unchanged.
   decline, delivered (+ proof), report issue (text, voice, **photo**: `POST /me/issues/photo`), location, messages,
   **devices** (`POST/DELETE /me/devices` for push).
 - Admin endpoints: KPIs, partners, deliveries, map, issues, escalations, insights (read-only), nearest vehicles, and
-  approve / reject a plan. Full list with schemas at `/docs`.
+  approve a plan (`POST /issues/{id}/accept?choice=rules|optimised`) or reject it. Full list with schemas at `/docs`.
 
 ## Live updates (`api/live.py`, `store.emit`)
 - Every change worth telling someone about is written to a small **`changes` table in the same transaction** as the

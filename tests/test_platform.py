@@ -104,7 +104,12 @@ def test_postgresql_is_migrated_by_alembic(fresh):
         assert set(schema.metadata.tables) <= tables
         for name, table in schema.metadata.tables.items():
             assert [c["name"] for c in found.get_columns(name)] == [c.name for c in table.columns], name
-    assert version == "0002"
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config()
+    config.set_main_option("script_location", str(db.MIGRATIONS))
+    assert version == ScriptDirectory.from_config(config).get_current_head()  # migrated to the newest revision
 
 
 # ---------------------------------------------------------------- after commit

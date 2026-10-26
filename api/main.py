@@ -9,9 +9,12 @@ Auth:  POST /login {identifier, password, super_console?} -> {"token": <JWT acce
        the session (every token of it stops working at once). The app's own session tokens are accepted too.
 Live:  WebSockets /ws/partner and /ws/admin (?token=…) stream offers, alerts and messages – see api/live.py.
 Push:  POST /me/devices {token} registers a phone for Firebase push (new order offers), DELETE removes it.
+Codes: POST /otp/request {identifier, channel?} sends a 6-digit code by email or SMS (DEMO: returned as demo_code);
+       POST /otp/verify {identifier, code} signs in like /login. Customers sign in only this way.
 Roles: Super Admin   -> /branches (summaries), /demo/reset
        Branch Admin  -> /kpis, /partners, /deliveries, /map, /issues, /escalations – own branch only
        Delivery Partner -> /me… – own data only; dp_id and branch come from the session
+       Customer      -> /my/orders – only orders carrying their mobile number or email
 Calls: /twilio/voice and /twilio/gather are Twilio webhooks (signed requests only), see docs/AI_CALL.md.
        A background task moves order offers along every 20 s (ESCALATION_SCHEDULER=off disables it);
        another retrains the acceptance model once a day when new decisions came in (LEARNING_SCHEDULER=off);
@@ -29,6 +32,7 @@ from pydantic import BaseModel
 from api import live
 from modules import (
     auth,
+    customers,
     db,
     escalation,
     issues,
@@ -148,6 +152,13 @@ def branch_admin_only(user=Depends(current_user)):
     return user
 
 
+def customer_only(user=Depends(current_user)):
+    """Allow customers only (403 otherwise); which orders they see comes from their account."""
+    if user["role"] != "customer":
+        raise HTTPException(403, "Customers only")
+    return user
+
+
 def partner_only(user=Depends(current_user)):
     """Allow delivery partners only (403 otherwise); their DP id comes from the session."""
     if user["role"] != "partner" or not user.get("dp_id"):
@@ -202,6 +213,21 @@ class LocationIn(BaseModel):
     lat: float
     lng: float
     accuracy_m: float | None = None
+
+
+class CodeRequestIn(BaseModel):
+    """Who wants a sign-in code, and how (email or sms; empty = by what was typed)."""
+
+    identifier: str
+    channel: str | None = None
+
+
+class CodeVerifyIn(BaseModel):
+    """The code that arrived."""
+
+    identifier: str
+    code: str
+    remember_me: bool = True
 
 
 class RefreshIn(BaseModel):
@@ -290,6 +316,33 @@ def login(body: LoginIn):
     return {**_access(user, session), "refresh_token": session, "user": _clean(user)}
 
 
+@app.post("/otp/request")
+def request_code(body: CodeRequestIn):
+    """Send a 6-digit sign-in code by email or SMS (staff and customers). Demo mode returns it as demo_code."""
+    if not body.identifier.strip():
+        raise HTTPException(422, auth.MESSAGES["missing"])
+    if body.channel not in (None, "email", "sms"):
+        raise HTTPException(422, "channel must be email or sms")
+    code, message, ok = auth.request_otp(body.identifier, "login", channel=body.channel)
+    if not ok:
+        if message == auth.MESSAGES["use_super_portal"]:  # the console is not advertised
+            message = auth.MESSAGES["otp_unknown"]
+        status = 429 if message == auth.MESSAGES["otp_rate"] else 404 if message in (
+            auth.MESSAGES["otp_unknown"], auth.MESSAGES["no_orders"]) else 400
+        raise HTTPException(status, message)
+    return {"ok": True, "message": message, "demo_code": code}
+
+
+@app.post("/otp/verify")
+def verify_code(body: CodeVerifyIn):
+    """Sign in with the code: same answer as /login (access token, refresh token, user)."""
+    user, error = auth.verify_otp(body.identifier, body.code, "login")
+    if error:
+        raise HTTPException(401 if error == auth.MESSAGES["otp_invalid"] else 403, error)
+    session = auth.create_session(user["user_id"], remember_me=body.remember_me)
+    return {**_access(user, session), "refresh_token": session, "user": _clean(user)}
+
+
 @app.post("/token/refresh")
 def refresh(body: RefreshIn):
     """A new access token for a session that is still valid (401 once it ended)."""
@@ -337,6 +390,22 @@ def reset(_=Depends(super_only)):
     """Reset the demo data after saving a backup (Super Admin)."""
     store.reset_demo()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- customer (own orders only)
+@app.get("/my/orders")
+def my_orders(user=Depends(customer_only)):
+    """The customer's orders: open ones first (stage, ETA, partner's first name, tracking link), then delivered."""
+    return _clean(customers.orders(user, track_url=operations.tracking_link))
+
+
+@app.get("/my/orders/{delivery_id}")
+def my_order(delivery_id: str, user=Depends(customer_only)):
+    """One of the customer's orders (404 when it isn't theirs)."""
+    found = customers.order(user, delivery_id, track_url=operations.tracking_link)
+    if found is None:
+        raise HTTPException(404, "No such order on your account")
+    return _clean(found)
 
 
 # ---------------------------------------------------------------- delivery partner (own data only)

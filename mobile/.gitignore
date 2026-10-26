@@ -1,0 +1,15 @@
+# Flutter / Dart build output
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+pubspec.lock
+*.iml
+.idea/
+# generated platform folders are made by `flutter create` (see README); Firebase config stays local
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+android/local.properties
+android/key.properties
+*.jks

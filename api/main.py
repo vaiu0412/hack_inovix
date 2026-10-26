@@ -190,6 +190,12 @@ class DeclineIn(BaseModel):
     reason: str = "Other"
 
 
+class SeenIn(BaseModel):
+    """Offers the partner's phone has shown."""
+
+    delivery_ids: list[str]
+
+
 class LocationIn(BaseModel):
     """A position from the partner's phone (GPS)."""
 
@@ -406,6 +412,13 @@ def my_location(body: LocationIn, user=Depends(partner_only)):
 def my_offers(user=Depends(partner_only)):
     """Orders offered to the partner that still need Accept / Can't take."""
     return _clean(escalation.partner_offers(user["dp_id"], user["branch_id"]))
+
+
+@app.post("/me/offers/seen")
+def offers_seen(body: SeenIn, user=Depends(partner_only)):
+    """The phone showed these offers: Sent -> Seen on the timeline (403 for an order that isn't theirs)."""
+    changed = _forbidden(lambda: escalation.mark_seen(user["dp_id"], user["branch_id"], body.delivery_ids[:50]))
+    return {"ok": True, "changed": changed}
 
 
 @app.post("/me/deliveries/{delivery_id}/decline")

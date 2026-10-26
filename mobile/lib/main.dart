@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'screens/customer_screen.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'services/push_service.dart';
@@ -27,9 +28,11 @@ class DeportApp extends StatelessWidget {
       theme: deportTheme(),
       home: state.booting
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : state.signedIn
-              ? const HomeShell()
-              : const LoginScreen(),
+          : !state.signedIn
+              ? const LoginScreen()
+              : state.isCustomer
+                  ? const CustomerScreen()
+                  : const HomeShell(),
     );
   }
 }

@@ -33,6 +33,9 @@ class AppState extends ChangeNotifier {
 
   bool booting = true;
   bool signedIn = false;
+  bool isCustomer = false;
+  List<CustomerOrder> myOrders = [];
+  Timer? _customerTimer;
   bool loading = false;
   Profile? profile;
   List<Delivery> deliveries = [];
@@ -52,6 +55,7 @@ class AppState extends ChangeNotifier {
   // ---------------------------------------------------------------- session
   Future<void> boot() async {
     signedIn = await api.resume();
+    isCustomer = api.role == 'customer';
     if (signedIn) await _afterSignIn();
     booting = false;
     notifyListeners();
@@ -60,11 +64,28 @@ class AppState extends ChangeNotifier {
   Future<void> signIn(String identifier, String password) async {
     await api.signIn(identifier, password);
     signedIn = true;
+    isCustomer = false;
+    await _afterSignIn();
+    notifyListeners();
+  }
+
+  /// Step 1 of code sign-in. Returns (message, DEMO code or null).
+  Future<(String, String?)> requestCode(String identifier, {String? channel}) =>
+      api.requestCode(identifier, channel: channel);
+
+  /// Step 2: partners get the full app, customers their orders.
+  Future<void> signInWithCode(String identifier, String code) async {
+    final user = await api.signInWithCode(identifier, code);
+    signedIn = true;
+    isCustomer = user.isCustomer;
     await _afterSignIn();
     notifyListeners();
   }
 
   Future<void> signOut() async {
+    _customerTimer?.cancel();
+    myOrders = [];
+    isCustomer = false;
     for (final s in _subscriptions) {
       await s.cancel();
     }
@@ -86,6 +107,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _afterSignIn() async {
+    if (isCustomer) {  // customers: their orders, refreshed every 30 s – no live feed, push, location or queue
+      await refreshOrders();
+      _customerTimer = Timer.periodic(const Duration(seconds: 30), (_) => refreshOrders());
+      return;
+    }
     _subscriptions
       ..add(live.changes.listen((_) => _soon()))
       ..add(live.connected.listen((_) => notifyListeners()))
@@ -100,7 +126,20 @@ class AppState extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------- data
+  Future<void> refreshOrders() async {
+    try {
+      myOrders = await api.myOrders();
+    } on ApiException catch (e) {
+      if (e.status == 401) {
+        await signOut();
+        _notices.add('Signed out – please sign in again');
+      }
+    }
+    notifyListeners();
+  }
+
   Future<void> refresh() async {
+    if (isCustomer) return refreshOrders();
     loading = true;
     notifyListeners();
     try {
@@ -213,6 +252,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _debounce?.cancel();
+    _customerTimer?.cancel();
     live.stop();
     location.stop();
     super.dispose();
